@@ -284,67 +284,36 @@ function createReferencePage(body) {
 }
 
 /**
- * Gets the answers from the Answers6.1 sheet
- * @returns {Array<Array<number>>} The answers array
- * @throws {Error} If answers cannot be read from the sheet
+ * Gets the name of the answers sheet from the images sheet
+ * @returns {string} The name of the answers sheet
+ * @throws {Error} If the sheet name cannot be read
  */
-function getAnswers() {
+function getAnswersSheetName() {
   try {
-    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Answers6.1');
-    if (!sheet) {
-      throw new Error('Answers6.1 sheet not found');
+    const sheet = getSpreadsheet();
+    const sheetName = sheet.getRange('G1').getValue();
+    
+    if (!sheetName || typeof sheetName !== 'string') {
+      throw new Error('Cell G1 does not contain a valid sheet name');
     }
     
-    const range = sheet.getRange('A1:F6');
-    const values = range.getValues();
-    
-    // Validate that all values are numbers between 1 and 6
-    if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= GRID_SIZE))) {
-      throw new Error('Invalid values in Answers6.1 sheet. All values must be integers between 1 and 6');
-    }
-    
-    return values;
+    return sheetName;
   } catch (error) {
-    throw new Error(`Failed to get answers: ${error.message}`);
+    throw new Error(`Failed to get answers sheet name: ${error.message}`);
   }
 }
 
 /**
- * Creates the answers sheet with the complete solution
- * @param {GoogleAppsScript.Document.Body} body - The document body
- */
-function createAnswersSheet(body) {
-  body.appendPageBreak();
-  createSectionHeader(body, 'Solution');
-  
-  // Get answers from the sheet
-  const answers = getAnswers();
-  
-  // Create a row for each answer array
-  answers.forEach((row, index) => {
-    const paragraph = body.appendParagraph(``);
-    row.forEach(value => {
-      const url = getImageFromCell(value);
-      const image = UrlFetchApp.fetch(url).getBlob();
-      const resizedImage = image.setContentType('image/png');
-      const insertedImage = paragraph.appendInlineImage(resizedImage);
-      insertedImage.setWidth(IMAGE_CONFIG.content.width);
-      insertedImage.setHeight(IMAGE_CONFIG.content.height);
-    });
-    body.appendParagraph(''); // Add spacing between rows
-  });
-}
-
-/**
- * Gets the Sudoku puzzle from the Answers6.1 sheet
+ * Gets the Sudoku puzzle from the answers sheet
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
  * @throws {Error} If puzzle cannot be read from the sheet
  */
 function getSudokuPuzzle() {
   try {
-    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Answers6.1');
+    const answersSheetName = getAnswersSheetName();
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(answersSheetName);
     if (!sheet) {
-      throw new Error('Answers6.1 sheet not found');
+      throw new Error(`Sheet "${answersSheetName}" not found`);
     }
     
     const range = sheet.getRange('A1:F6');
@@ -385,6 +354,59 @@ function getSudokuPuzzle() {
   } catch (error) {
     throw new Error(`Failed to get Sudoku puzzle: ${error.message}`);
   }
+}
+
+/**
+ * Gets the answers from the answers sheet
+ * @returns {Array<Array<number>>} The answers array
+ * @throws {Error} If answers cannot be read from the sheet
+ */
+function getAnswers() {
+  try {
+    const answersSheetName = getAnswersSheetName();
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(answersSheetName);
+    if (!sheet) {
+      throw new Error(`Sheet "${answersSheetName}" not found`);
+    }
+    
+    const range = sheet.getRange('A1:F6');
+    const values = range.getValues();
+    
+    // Validate that all values are numbers between 1 and 6
+    if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= GRID_SIZE))) {
+      throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and 6`);
+    }
+    
+    return values;
+  } catch (error) {
+    throw new Error(`Failed to get answers: ${error.message}`);
+  }
+}
+
+/**
+ * Creates the answers sheet with the complete solution
+ * @param {GoogleAppsScript.Document.Body} body - The document body
+ */
+function createAnswersSheet(body) {
+  body.appendPageBreak();
+  createSectionHeader(body, 'Solution');
+  
+  // Get answers from the sheet
+  const answers = getAnswers();
+  
+  // Create a row for each answer array
+  answers.forEach((row, index) => {
+    const paragraph = body.appendParagraph(``);
+    row.forEach(value => {
+      const url = getImageFromCell(value);
+      const image = UrlFetchApp.fetch(url).getBlob();
+      const resizedImage = image.setContentType('image/png');
+      const insertedImage = paragraph.appendInlineImage(resizedImage);
+      insertedImage.setWidth(IMAGE_CONFIG.content.width);
+      insertedImage.setHeight(IMAGE_CONFIG.content.height);
+    });
+    body.appendParagraph(''); // Add spacing between rows
+  });
 }
 
 /**
