@@ -1,22 +1,3 @@
-// Sudoku puzzle data
-const sudoku = [
-  [null, 6, null, 5, null, null],
-  [3, null, null, null, null, null],
-  [2, 3, null, 6, 5, null],
-  [null, null, 1, 4, null, null],
-  [null, null, null, 1, null, 4],
-  [1, null, null, null, null, null],
-];
-
-const answers = [
-  [4, 6, 2, 5, 1, 3],
-  [3, 1, 5, 2, 4, 6],
-  [2, 3, 4, 6, 5, 1],
-  [6, 5, 1, 4, 3, 2],
-  [5, 2, 3, 1, 6, 4],
-  [1, 4, 6, 3, 2, 5],
-];
-
 // Constants
 const GRID_SIZE = 6;
 const GROUP_SIZE = 2;
@@ -44,7 +25,6 @@ const GROUP_BOUNDARIES = [
   { rowStart: 4, rowEnd: 5, colStart: 0, colEnd: 2 }, // Group 5 (bottom left)
   { rowStart: 4, rowEnd: 5, colStart: 3, colEnd: 5 }  // Group 6 (bottom right)
 ];
-
 
 /**
  * Gets the active spreadsheet
@@ -85,25 +65,36 @@ function getImageFromCell(num) {
   }
   
   const content = match[1];
+  console.log(`Processing image formula for number ${num}: ${formula}`);
   
   // If it's a quoted string, it's a direct URL
   if (content.startsWith('"') && content.endsWith('"')) {
     return content.slice(1, -1);
   }
   
-  // Otherwise, it's a cell reference
-  try {
-    const referencedCell = sheet.getParent().getRange(content);
-    const url = referencedCell.getValue();
-    
-    if (!url || typeof url !== 'string') {
-      throw new Error(`Referenced cell ${content} does not contain a valid URL`);
+  // If it contains a sheet reference (e.g., "Sheet2!"), it's a cell reference
+  if (content.includes('!')) {
+    try {
+      console.log(`Looking up cell reference: ${content}`);
+      const spreadsheet = sheet.getParent();
+      const referencedCell = spreadsheet.getRange(content);
+      const url = referencedCell.getValue();
+      
+      console.log(`Found URL in referenced cell: ${url}`);
+      
+      if (!url || typeof url !== 'string') {
+        throw new Error(`Referenced cell ${content} does not contain a valid URL`);
+      }
+      
+      return url;
+    } catch (error) {
+      console.error(`Error processing cell reference ${content}:`, error);
+      throw new Error(`Failed to get URL from referenced cell ${content}: ${error.message}`);
     }
-    
-    return url;
-  } catch (error) {
-    throw new Error(`Failed to get URL from referenced cell ${content}: ${error.message}`);
   }
+  
+  // If we get here, assume it's a direct URL
+  return content;
 }
 
 /**
@@ -293,12 +284,41 @@ function createReferencePage(body) {
 }
 
 /**
+ * Gets the answers from the Answers6.1 sheet
+ * @returns {Array<Array<number>>} The answers array
+ * @throws {Error} If answers cannot be read from the sheet
+ */
+function getAnswers() {
+  try {
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Answers6.1');
+    if (!sheet) {
+      throw new Error('Answers6.1 sheet not found');
+    }
+    
+    const range = sheet.getRange('A1:F6');
+    const values = range.getValues();
+    
+    // Validate that all values are numbers between 1 and 6
+    if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= GRID_SIZE))) {
+      throw new Error('Invalid values in Answers6.1 sheet. All values must be integers between 1 and 6');
+    }
+    
+    return values;
+  } catch (error) {
+    throw new Error(`Failed to get answers: ${error.message}`);
+  }
+}
+
+/**
  * Creates the answers sheet with the complete solution
  * @param {GoogleAppsScript.Document.Body} body - The document body
  */
 function createAnswersSheet(body) {
   body.appendPageBreak();
   createSectionHeader(body, 'Solution');
+  
+  // Get answers from the sheet
+  const answers = getAnswers();
   
   // Create a row for each answer array
   answers.forEach((row, index) => {
@@ -316,15 +336,70 @@ function createAnswersSheet(body) {
 }
 
 /**
+ * Gets the Sudoku puzzle from the Answers6.1 sheet
+ * @returns {Array<Array<number|null>>} The Sudoku puzzle array
+ * @throws {Error} If puzzle cannot be read from the sheet
+ */
+function getSudokuPuzzle() {
+  try {
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Answers6.1');
+    if (!sheet) {
+      throw new Error('Answers6.1 sheet not found');
+    }
+    
+    const range = sheet.getRange('A1:F6');
+    const values = range.getValues();
+    
+    // Create the Sudoku puzzle array
+    const puzzle = [];
+    
+    // Process each row
+    for (let i = 0; i < GRID_SIZE; i++) {
+      const row = [];
+      for (let j = 0; j < GRID_SIZE; j++) {
+        const value = values[i][j];
+        
+        // Check if the cell is bold by getting its font weight
+        let isBold = false;
+        try {
+          const cell = sheet.getRange(i + 1, j + 1);
+          const fontWeight = cell.getFontWeight();
+          // Check if the font weight is "bold" (string comparison)
+          isBold = fontWeight === "bold";
+        } catch (e) {
+          console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
+        }
+        
+        // If the cell is bold and contains a number between 1 and 6, use it
+        // Otherwise, use null
+        if (isBold && Number.isInteger(value) && value >= 1 && value <= GRID_SIZE) {
+          row.push(value);
+        } else {
+          row.push(null);
+        }
+      }
+      puzzle.push(row);
+    }
+    
+    return puzzle;
+  } catch (error) {
+    throw new Error(`Failed to get Sudoku puzzle: ${error.message}`);
+  }
+}
+
+/**
  * Main function to run all outputs
  */
 function main() {
   try {
     const body = createDocument('Mint Hulzo Coin');
     
-    outputRows(sudoku, body);
-    outputColumns(sudoku, body);
-    outputGroups(sudoku, body);
+    // Get the Sudoku puzzle from the sheet
+    const puzzle = getSudokuPuzzle();
+    
+    outputRows(puzzle, body);
+    outputColumns(puzzle, body);
+    outputGroups(puzzle, body);
     createReferencePage(body);
     createAnswersSheet(body);
   } catch (error) {
