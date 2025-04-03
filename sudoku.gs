@@ -1,4 +1,3 @@
-
 // Sudoku puzzle data
 const sudoku = [
   [null, 6, null, 5, null, null],
@@ -9,14 +8,15 @@ const sudoku = [
   [1, null, null, null, null, null],
 ];
 
-const answers = {
+const answers = [
   [4, 6, 2, 5, 1, 3],
   [3, 1, 5, 2, 4, 6],
   [2, 3, 4, 6, 5, 1],
   [6, 5, 1, 4, 3, 2],
   [5, 2, 3, 1, 6, 4],
   [1, 4, 6, 3, 2, 5],
-}
+];
+
 // Constants
 const GRID_SIZE = 6;
 const GROUP_SIZE = 2;
@@ -78,12 +78,32 @@ function getImageFromCell(num) {
     throw new Error(`Cell ${String.fromCharCode(65 + num)}1 does not contain an image formula`);
   }
   
-  const match = formula.match(/=image\("([^"]+)"\)/i);
+  // Extract the content from the formula (could be a URL or cell reference)
+  const match = formula.match(/=image\(([^)]+)\)/i);
   if (!match) {
     throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num)}1`);
   }
   
-  return match[1];
+  const content = match[1];
+  
+  // If it's a quoted string, it's a direct URL
+  if (content.startsWith('"') && content.endsWith('"')) {
+    return content.slice(1, -1);
+  }
+  
+  // Otherwise, it's a cell reference
+  try {
+    const referencedCell = sheet.getParent().getRange(content);
+    const url = referencedCell.getValue();
+    
+    if (!url || typeof url !== 'string') {
+      throw new Error(`Referenced cell ${content} does not contain a valid URL`);
+    }
+    
+    return url;
+  } catch (error) {
+    throw new Error(`Failed to get URL from referenced cell ${content}: ${error.message}`);
+  }
 }
 
 /**
@@ -94,7 +114,7 @@ function getImageFromCell(num) {
 function createDocument(title) {
   try {
     const doc = DocumentApp.create(title);
-    doc.setMarginTop(18);
+    doc.setMarginTop(36);
     doc.setMarginBottom(18);
     return doc.getBody();
   } catch (error) {
@@ -273,6 +293,29 @@ function createReferencePage(body) {
 }
 
 /**
+ * Creates the answers sheet with the complete solution
+ * @param {GoogleAppsScript.Document.Body} body - The document body
+ */
+function createAnswersSheet(body) {
+  body.appendPageBreak();
+  createSectionHeader(body, 'Solution');
+  
+  // Create a row for each answer array
+  answers.forEach((row, index) => {
+    const paragraph = body.appendParagraph(``);
+    row.forEach(value => {
+      const url = getImageFromCell(value);
+      const image = UrlFetchApp.fetch(url).getBlob();
+      const resizedImage = image.setContentType('image/png');
+      const insertedImage = paragraph.appendInlineImage(resizedImage);
+      insertedImage.setWidth(IMAGE_CONFIG.content.width);
+      insertedImage.setHeight(IMAGE_CONFIG.content.height);
+    });
+    body.appendParagraph(''); // Add spacing between rows
+  });
+}
+
+/**
  * Main function to run all outputs
  */
 function main() {
@@ -283,6 +326,7 @@ function main() {
     outputColumns(sudoku, body);
     outputGroups(sudoku, body);
     createReferencePage(body);
+    createAnswersSheet(body);
   } catch (error) {
     console.error('Error processing sudoku:', error.message);
     throw error; // Re-throw to show in Apps Script execution log
