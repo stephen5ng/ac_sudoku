@@ -1,7 +1,5 @@
 // Constants
 const GRID_SIZE = 6;
-const GROUP_SIZE = 2;
-const GROUP_COUNT = 3;
 const SPREADSHEET_ID = '1t9mwKfa_aPzJwx6qUOgO54N9-1XBQJGCPKY3PpwF-BE';
 
 // Image configuration
@@ -16,6 +14,9 @@ const IMAGE_CONFIG = {
   }
 };
 
+// Cache for image blobs
+const imageCache = new Map();
+
 // Group boundaries for 6x6 grid with 2x3 groups
 const GROUP_BOUNDARIES = [
   { rowStart: 0, rowEnd: 1, colStart: 0, colEnd: 2 }, // Group 1 (top left)
@@ -25,6 +26,22 @@ const GROUP_BOUNDARIES = [
   { rowStart: 4, rowEnd: 5, colStart: 0, colEnd: 2 }, // Group 5 (bottom left)
   { rowStart: 4, rowEnd: 5, colStart: 3, colEnd: 5 }  // Group 6 (bottom right)
 ];
+
+/**
+ * Gets an image blob from cache or fetches it
+ * @param {string} url - The image URL
+ * @returns {GoogleAppsScript.Base.Blob} The image blob
+ */
+function getImageBlob(url) {
+  if (imageCache.has(url)) {
+    return imageCache.get(url);
+  }
+  
+  const image = UrlFetchApp.fetch(url).getBlob();
+  const resizedImage = image.setContentType('image/png');
+  imageCache.set(url, resizedImage);
+  return resizedImage;
+}
 
 /**
  * Gets the active spreadsheet
@@ -114,28 +131,6 @@ function createDocument(title) {
 }
 
 /**
- * Inserts an image from a URL into the document
- * @param {GoogleAppsScript.Document.Body} body - The document body
- * @param {string} url - The URL of the image
- * @param {Object} config - Image configuration (width and height)
- * @returns {GoogleAppsScript.Document.InlineImage} The inserted image
- * @throws {Error} If image insertion fails
- */
-function insertImageFromUrl(body, url, config) {
-  try {
-    const image = UrlFetchApp.fetch(url).getBlob();
-    const resizedImage = image.setContentType('image/png');
-    const paragraph = body.appendParagraph('');
-    const insertedImage = paragraph.appendInlineImage(resizedImage);
-    insertedImage.setWidth(config.width);
-    insertedImage.setHeight(config.height);
-    return insertedImage;
-  } catch (error) {
-    throw new Error(`Failed to insert image from URL: ${error.message}`);
-  }
-}
-
-/**
  * Creates a section header in the document
  * @param {GoogleAppsScript.Document.Body} body - The document body
  * @param {string} text - The header text
@@ -196,9 +191,8 @@ function outputRows(sudokuArray, body) {
       .filter(value => value !== null)
       .forEach(value => {
         const url = getImageFromCell(value);
-        const image = UrlFetchApp.fetch(url).getBlob();
-        const resizedImage = image.setContentType('image/png');
-        const insertedImage = paragraph.appendInlineImage(resizedImage);
+        const image = getImageBlob(url);
+        const insertedImage = paragraph.appendInlineImage(image);
         insertedImage.setWidth(IMAGE_CONFIG.content.width);
         insertedImage.setHeight(IMAGE_CONFIG.content.height);
       });
@@ -223,9 +217,8 @@ function outputColumns(sudokuArray, body) {
       .filter(value => value !== null)
       .forEach(value => {
         const url = getImageFromCell(value);
-        const image = UrlFetchApp.fetch(url).getBlob();
-        const resizedImage = image.setContentType('image/png');
-        const insertedImage = paragraph.appendInlineImage(resizedImage);
+        const image = getImageBlob(url);
+        const insertedImage = paragraph.appendInlineImage(image);
         insertedImage.setWidth(IMAGE_CONFIG.content.width);
         insertedImage.setHeight(IMAGE_CONFIG.content.height);
       });
@@ -247,9 +240,8 @@ function outputGroups(sudokuArray, body) {
     const paragraph = body.appendParagraph(`GROUP ${index + 1}: `);
     const groupValues = getNonNullValues(sudokuArray, boundaries);
     groupValues.forEach(url => {
-      const image = UrlFetchApp.fetch(url).getBlob();
-      const resizedImage = image.setContentType('image/png');
-      const insertedImage = paragraph.appendInlineImage(resizedImage);
+      const image = getImageBlob(url);
+      const insertedImage = paragraph.appendInlineImage(image);
       insertedImage.setWidth(IMAGE_CONFIG.content.width);
       insertedImage.setHeight(IMAGE_CONFIG.content.height);
     });
@@ -269,12 +261,11 @@ function createReferencePage(body) {
   for (let num = 1; num <= GRID_SIZE; num++) {
     const paragraph = body.appendParagraph('');
     const url = getImageFromCell(num);
-    const image = UrlFetchApp.fetch(url).getBlob();
-    const resizedImage = image.setContentType('image/png');
+    const image = getImageBlob(url);
     
     // Insert 6 copies of the same image
     for (let i = 0; i < 6; i++) {
-      const insertedImage = paragraph.appendInlineImage(resizedImage);
+      const insertedImage = paragraph.appendInlineImage(image);
       insertedImage.setWidth(IMAGE_CONFIG.content.width);
       insertedImage.setHeight(IMAGE_CONFIG.content.height);
     }
@@ -399,9 +390,8 @@ function createAnswersSheet(body) {
     const paragraph = body.appendParagraph(``);
     row.forEach(value => {
       const url = getImageFromCell(value);
-      const image = UrlFetchApp.fetch(url).getBlob();
-      const resizedImage = image.setContentType('image/png');
-      const insertedImage = paragraph.appendInlineImage(resizedImage);
+      const image = getImageBlob(url);
+      const insertedImage = paragraph.appendInlineImage(image);
       insertedImage.setWidth(IMAGE_CONFIG.content.width);
       insertedImage.setHeight(IMAGE_CONFIG.content.height);
     });
