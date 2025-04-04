@@ -284,6 +284,7 @@ function outputSection(body, title, sections, prefix) {
     // Sort by the original number value
     section.sort((a, b) => a.value - b.value).forEach(item => insertImage(paragraph, item.url));
     body.appendParagraph(''); // Add spacing between sections
+    body.appendHorizontalRule(); // Add horizontal line between sections
   });
   body.appendPageBreak();
 }
