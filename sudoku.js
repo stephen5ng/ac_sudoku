@@ -82,8 +82,8 @@ function getGridSize() {
   const sheet = getSpreadsheet();
   let count = 0;
   
-  // Count images in the first row, starting from column C
-  for (let i = 3; i <= 8; i++) {
+  // Count images in the first row, starting from column D (index 4)
+  for (let i = 4; i <= 9; i++) {
     const cell = sheet.getRange(1, i);
     const formula = cell.getFormula();
     if (formula.toLowerCase().startsWith('=image(')) {
@@ -91,15 +91,17 @@ function getGridSize() {
     }
   }
   
-  // If we have 4 images followed by a sheet name, use 4x4 grid
+  // If we have 4 images in columns D-G, use 4x4 grid
   if (count === 4) {
-    const nextCell = sheet.getRange(1, 7).getValue();
-    if (typeof nextCell === 'string' && nextCell.trim() !== '') {
-      return GRID_SIZE_4;
-    }
+    return GRID_SIZE_4;
   }
   
-  return GRID_SIZE_6;
+  // If we have 6 images in columns D-I, use 6x6 grid
+  if (count === 6) {
+    return GRID_SIZE_6;
+  }
+  
+  throw new Error(`Invalid number of images found: ${count}. Expected 4 or 6 images.`);
 }
 
 /**
@@ -143,7 +145,7 @@ function insertImage(paragraph, url) {
  * Gets the image URL from a spreadsheet cell
  * @param {number} num - The number to map (1-6 or 1-4)
  * @returns {string} The image URL from the corresponding cell
- * @throws {Error} If the number is out of range or cell doesn't contain an image
+ * @throws {Error} If the number is out of range, cell doesn't contain an image formula, or referenced cell is empty
  */
 function getImageFromCell(num) {
   const gridSize = getGridSize();
@@ -152,22 +154,23 @@ function getImageFromCell(num) {
   }
   
   const sheet = getSpreadsheet();
-  // Add 2 to the column to account for the double shift
-  const cell = sheet.getRange(1, num + 2);
+  // Add 3 to the column to account for the triple shift (A=shortname, B=longname, C=sheetname)
+  const cell = sheet.getRange(1, num + 3);
   const formula = cell.getFormula();
   
   if (!formula.toLowerCase().startsWith('=image(')) {
-    throw new Error(`Cell ${String.fromCharCode(65 + num + 1)}1 does not contain an image formula`);
+    throw new Error(`Cell ${String.fromCharCode(65 + num + 2)}1 does not contain an image formula`);
   }
   
   // Extract the content from the formula (could be a URL or cell reference)
   const match = formula.match(/=image\(([^)]+)\)/i);
   if (!match) {
-    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 1)}1`);
+    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 2)}1`);
   }
   
   const content = match[1];
   console.log(`Processing image formula for number ${num}: ${formula}`);
+  console.log(`Extracted content: ${content}`);
   
   // If it's a quoted string, it's a direct URL
   if (content.startsWith('"') && content.endsWith('"')) {
@@ -180,15 +183,16 @@ function getImageFromCell(num) {
       console.log(`Looking up cell reference: ${content}`);
       const spreadsheet = sheet.getParent();
       const referencedCell = spreadsheet.getRange(content);
-      const url = referencedCell.getValue();
+      console.log(`Referenced cell range: ${referencedCell.getA1Notation()}`);
       
-      console.log(`Found URL in referenced cell: ${url}`);
+      const value = referencedCell.getValue();
+      console.log(`Value in referenced cell: ${value} (type: ${typeof value})`);
       
-      if (!url || typeof url !== 'string') {
-        throw new Error(`Referenced cell ${content} does not contain a valid URL`);
+      if (!value || typeof value !== 'string' || value.trim() === '') {
+        throw new Error(`Referenced cell ${content} is empty - please fill in the missing image URL`);
       }
       
-      return url;
+      return value;
     } catch (error) {
       console.error(`Error processing cell reference ${content}:`, error);
       throw new Error(`Failed to get URL from referenced cell ${content}: ${error.message}`);
@@ -293,10 +297,11 @@ function outputRows(sudokuArray, body) {
   validateSudokuArray(sudokuArray);
   const sections = sudokuArray.map(row => 
     row
-      .map(value => value !== null ? {
-        url: getImageFromCell(value),
-        value: value
-      } : null)
+      .map(value => {
+        if (value === null) return null;
+        const url = getImageFromCell(value);
+        return url ? { url, value } : null;
+      })
       .filter(Boolean)
   );
   outputSection(body, 'ROWS must not contain any of these values', sections, 'ROW');
@@ -312,10 +317,12 @@ function outputColumns(sudokuArray, body) {
   const gridSize = getGridSize();
   const sections = Array.from({ length: gridSize }, (_, j) =>
     sudokuArray
-      .map(row => row[j] !== null ? {
-        url: getImageFromCell(row[j]),
-        value: row[j]
-      } : null)
+      .map(row => {
+        const value = row[j];
+        if (value === null) return null;
+        const url = getImageFromCell(value);
+        return url ? { url, value } : null;
+      })
       .filter(Boolean)
   );
   outputSection(body, 'COLUMNS must not contain any of these values', sections, 'COLUMN');
@@ -330,7 +337,21 @@ function outputGroups(sudokuArray, body) {
   validateSudokuArray(sudokuArray);
   const gridSize = getGridSize();
   const groupBoundaries = getGroupBoundaries(gridSize);
-  const sections = groupBoundaries.map(boundaries => getNonNullValues(sudokuArray, boundaries));
+  const sections = groupBoundaries.map(boundaries => {
+    const values = [];
+    for (let i = boundaries.rowStart; i <= boundaries.rowEnd; i++) {
+      for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
+        const value = sudokuArray[i][j];
+        if (value !== null) {
+          const url = getImageFromCell(value);
+          if (url) {
+            values.push({ url, value });
+          }
+        }
+      }
+    }
+    return values;
+  });
   outputSection(body, 'GROUPS must not contain any of these values', sections, 'GROUP');
 }
 
