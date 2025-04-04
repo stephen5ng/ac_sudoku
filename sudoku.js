@@ -37,6 +37,44 @@ const GROUP_BOUNDARIES_4 = [
 ];
 
 /**
+ * Helper function to handle spreadsheet errors
+ * @param {Function} operation - The operation to perform
+ * @param {string} errorMessage - The error message prefix
+ * @returns {any} The result of the operation
+ * @throws {Error} If the operation fails
+ */
+function handleSpreadsheetError(operation, errorMessage) {
+  try {
+    return operation();
+  } catch (error) {
+    throw new Error(`${errorMessage}: ${error.message}`);
+  }
+}
+
+/**
+ * Gets the active spreadsheet
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} The active sheet
+ */
+function getSpreadsheet() {
+  return handleSpreadsheetError(
+    () => SpreadsheetApp.openById(SPREADSHEET_ID).getActiveSheet(),
+    'Failed to access spreadsheet'
+  );
+}
+
+/**
+ * Gets a sheet by name
+ * @param {string} sheetName - The name of the sheet
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} The sheet
+ */
+function getSheetByName(sheetName) {
+  return handleSpreadsheetError(
+    () => SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName),
+    `Failed to access sheet "${sheetName}"`
+  );
+}
+
+/**
  * Gets the grid size based on the number of images in the first row
  * @returns {number} The grid size (4 or 6)
  */
@@ -90,16 +128,15 @@ function getImageBlob(url) {
 }
 
 /**
- * Gets the active spreadsheet
- * @returns {GoogleAppsScript.Spreadsheet.Sheet} The active sheet
- * @throws {Error} If spreadsheet cannot be accessed
+ * Inserts an image into a paragraph
+ * @param {GoogleAppsScript.Document.Paragraph} paragraph - The paragraph to insert into
+ * @param {string} url - The image URL
  */
-function getSpreadsheet() {
-  try {
-    return SpreadsheetApp.openById(SPREADSHEET_ID).getActiveSheet();
-  } catch (error) {
-    throw new Error(`Failed to access spreadsheet: ${error.message}`);
-  }
+function insertImage(paragraph, url) {
+  const image = getImageBlob(url);
+  const insertedImage = paragraph.appendInlineImage(image);
+  insertedImage.setWidth(IMAGE_CONFIG.content.width);
+  insertedImage.setHeight(IMAGE_CONFIG.content.height);
 }
 
 /**
@@ -167,14 +204,15 @@ function getImageFromCell(num) {
  * @returns {GoogleAppsScript.Document.Body} The document body
  */
 function createDocument(title) {
-  try {
-    const doc = DocumentApp.create(title);
-    doc.setMarginTop(36);
-    doc.setMarginBottom(18);
-    return doc.getBody();
-  } catch (error) {
-    throw new Error(`Failed to create document: ${error.message}`);
-  }
+  return handleSpreadsheetError(
+    () => {
+      const doc = DocumentApp.create(title);
+      doc.setMarginTop(36);
+      doc.setMarginBottom(18);
+      return doc.getBody();
+    },
+    'Failed to create document'
+  );
 }
 
 /**
@@ -210,18 +248,39 @@ function validateSudokuArray(array) {
  * Gets non-null values from a 2D array slice
  * @param {Array<Array<number|null>>} array - The 2D array
  * @param {Object} boundaries - The boundaries to slice
- * @returns {Array<string>} Array of image URLs from corresponding cells
+ * @returns {Array<{url: string, value: number}>} Array of image URLs and their original values
  */
 function getNonNullValues(array, boundaries) {
   const values = [];
   for (let i = boundaries.rowStart; i <= boundaries.rowEnd; i++) {
     for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
       if (array[i][j] !== null) {
-        values.push(getImageFromCell(array[i][j]));
+        values.push({
+          url: getImageFromCell(array[i][j]),
+          value: array[i][j]
+        });
       }
     }
   }
   return values;
+}
+
+/**
+ * Outputs a section with images from values
+ * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {string} title - The section title
+ * @param {Array<Array<{url: string, value: number}>>} sections - Array of arrays of image data
+ * @param {string} prefix - The prefix for each section (e.g., "ROW", "COLUMN", "GROUP")
+ */
+function outputSection(body, title, sections, prefix) {
+  createSectionHeader(body, title);
+  sections.forEach((section, index) => {
+    const paragraph = body.appendParagraph(`${prefix} ${index + 1}: `);
+    // Sort by the original number value
+    section.sort((a, b) => a.value - b.value).forEach(item => insertImage(paragraph, item.url));
+    body.appendParagraph(''); // Add spacing between sections
+  });
+  body.appendPageBreak();
 }
 
 /**
@@ -231,22 +290,15 @@ function getNonNullValues(array, boundaries) {
  */
 function outputRows(sudokuArray, body) {
   validateSudokuArray(sudokuArray);
-  
-  createSectionHeader(body, 'ROWS must not contain any of these values');
-  sudokuArray.forEach((row, index) => {
-    const paragraph = body.appendParagraph(`ROW ${index + 1}: `);
+  const sections = sudokuArray.map(row => 
     row
-      .filter(value => value !== null)
-      .forEach(value => {
-        const url = getImageFromCell(value);
-        const image = getImageBlob(url);
-        const insertedImage = paragraph.appendInlineImage(image);
-        insertedImage.setWidth(IMAGE_CONFIG.content.width);
-        insertedImage.setHeight(IMAGE_CONFIG.content.height);
-      });
-    body.appendParagraph(''); // Add spacing between rows
-  });
-  body.appendPageBreak();
+      .map(value => value !== null ? {
+        url: getImageFromCell(value),
+        value: value
+      } : null)
+      .filter(Boolean)
+  );
+  outputSection(body, 'ROWS must not contain any of these values', sections, 'ROW');
 }
 
 /**
@@ -256,24 +308,16 @@ function outputRows(sudokuArray, body) {
  */
 function outputColumns(sudokuArray, body) {
   validateSudokuArray(sudokuArray);
-  
-  createSectionHeader(body, 'COLUMNS must not contain any of these values');
   const gridSize = getGridSize();
-  for (let j = 0; j < gridSize; j++) {
-    const paragraph = body.appendParagraph(`COLUMN ${j + 1}: `);
+  const sections = Array.from({ length: gridSize }, (_, j) =>
     sudokuArray
-      .map(row => row[j])
-      .filter(value => value !== null)
-      .forEach(value => {
-        const url = getImageFromCell(value);
-        const image = getImageBlob(url);
-        const insertedImage = paragraph.appendInlineImage(image);
-        insertedImage.setWidth(IMAGE_CONFIG.content.width);
-        insertedImage.setHeight(IMAGE_CONFIG.content.height);
-      });
-    body.appendParagraph(''); // Add spacing between columns
-  }
-  body.appendPageBreak();
+      .map(row => row[j] !== null ? {
+        url: getImageFromCell(row[j]),
+        value: row[j]
+      } : null)
+      .filter(Boolean)
+  );
+  outputSection(body, 'COLUMNS must not contain any of these values', sections, 'COLUMN');
 }
 
 /**
@@ -283,22 +327,10 @@ function outputColumns(sudokuArray, body) {
  */
 function outputGroups(sudokuArray, body) {
   validateSudokuArray(sudokuArray);
-  
-  createSectionHeader(body, 'GROUPS must not contain any of these values');
   const gridSize = getGridSize();
   const groupBoundaries = getGroupBoundaries(gridSize);
-  
-  groupBoundaries.forEach((boundaries, index) => {
-    const paragraph = body.appendParagraph(`GROUP ${index + 1}: `);
-    const groupValues = getNonNullValues(sudokuArray, boundaries);
-    groupValues.forEach(url => {
-      const image = getImageBlob(url);
-      const insertedImage = paragraph.appendInlineImage(image);
-      insertedImage.setWidth(IMAGE_CONFIG.content.width);
-      insertedImage.setHeight(IMAGE_CONFIG.content.height);
-    });
-    body.appendParagraph(''); // Add spacing between groups
-  });
+  const sections = groupBoundaries.map(boundaries => getNonNullValues(sudokuArray, boundaries));
+  outputSection(body, 'GROUPS must not contain any of these values', sections, 'GROUP');
 }
 
 /**
@@ -315,13 +347,10 @@ function createReferencePage(body) {
   for (let num = 1; num <= gridSize; num++) {
     const paragraph = body.appendParagraph('');
     const url = getImageFromCell(num);
-    const image = getImageBlob(url);
     
     // Insert copies of the same image
     for (let i = 0; i < gridSize; i++) {
-      const insertedImage = paragraph.appendInlineImage(image);
-      insertedImage.setWidth(IMAGE_CONFIG.content.width);
-      insertedImage.setHeight(IMAGE_CONFIG.content.height);
+      insertImage(paragraph, url);
     }
     
     body.appendParagraph(''); // Add spacing between rows
@@ -334,101 +363,91 @@ function createReferencePage(body) {
  * @throws {Error} If the sheet name cannot be read
  */
 function getAnswersSheetName() {
-  try {
-    const sheet = getSpreadsheet();
-    const gridSize = getGridSize();
-    const sheetName = sheet.getRange(1, gridSize + 1).getValue();
-    
-    if (!sheetName || typeof sheetName !== 'string') {
-      throw new Error(`Cell ${String.fromCharCode(65 + gridSize)}1 does not contain a valid sheet name`);
-    }
-    
-    return sheetName;
-  } catch (error) {
-    throw new Error(`Failed to get answers sheet name: ${error.message}`);
+  const sheet = getSpreadsheet();
+  const gridSize = getGridSize();
+  const sheetName = sheet.getRange(1, gridSize + 1).getValue();
+  
+  if (!sheetName || typeof sheetName !== 'string') {
+    throw new Error(`Cell ${String.fromCharCode(65 + gridSize)}1 does not contain a valid sheet name`);
   }
+  
+  return sheetName;
+}
+
+/**
+ * Gets data from a sheet range
+ * @param {string} sheetName - The name of the sheet
+ * @param {string} range - The range to get data from
+ * @returns {Array<Array<any>>} The data from the range
+ */
+function getSheetData(sheetName, range) {
+  const sheet = getSheetByName(sheetName);
+  if (!sheet) {
+    throw new Error(`Sheet "${sheetName}" not found`);
+  }
+  return sheet.getRange(range).getValues();
 }
 
 /**
  * Gets the Sudoku puzzle from the answers sheet
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
- * @throws {Error} If puzzle cannot be read from the sheet
  */
 function getSudokuPuzzle() {
-  try {
-    const answersSheetName = getAnswersSheetName();
-    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(answersSheetName);
-    if (!sheet) {
-      throw new Error(`Sheet "${answersSheetName}" not found`);
-    }
-    
-    const gridSize = getGridSize();
-    const range = sheet.getRange(`A1:${String.fromCharCode(64 + gridSize)}${gridSize}`);
-    const values = range.getValues();
-    
-    // Create the Sudoku puzzle array
-    const puzzle = [];
-    
-    // Process each row
-    for (let i = 0; i < gridSize; i++) {
-      const row = [];
-      for (let j = 0; j < gridSize; j++) {
-        const value = values[i][j];
-        
-        // Check if the cell is bold by getting its font weight
-        let isBold = false;
-        try {
-          const cell = sheet.getRange(i + 1, j + 1);
-          const fontWeight = cell.getFontWeight();
-          // Check if the font weight is "bold" (string comparison)
-          isBold = fontWeight === "bold";
-        } catch (e) {
-          console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
-        }
-        
-        // If the cell is bold and contains a number between 1 and gridSize, use it
-        // Otherwise, use null
-        if (isBold && Number.isInteger(value) && value >= 1 && value <= gridSize) {
-          row.push(value);
-        } else {
-          row.push(null);
-        }
+  const answersSheetName = getAnswersSheetName();
+  const gridSize = getGridSize();
+  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+  const values = getSheetData(answersSheetName, range);
+  const sheet = getSheetByName(answersSheetName);
+  
+  // Create the Sudoku puzzle array
+  const puzzle = [];
+  
+  // Process each row
+  for (let i = 0; i < gridSize; i++) {
+    const row = [];
+    for (let j = 0; j < gridSize; j++) {
+      const value = values[i][j];
+      
+      // Check if the cell is bold by getting its font weight
+      let isBold = false;
+      try {
+        const cell = sheet.getRange(i + 1, j + 1);
+        const fontWeight = cell.getFontWeight();
+        isBold = fontWeight === "bold";
+      } catch (e) {
+        console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
       }
-      puzzle.push(row);
+      
+      // If the cell is bold and contains a number between 1 and gridSize, use it
+      // Otherwise, use null
+      if (isBold && Number.isInteger(value) && value >= 1 && value <= gridSize) {
+        row.push(value);
+      } else {
+        row.push(null);
+      }
     }
-    
-    return puzzle;
-  } catch (error) {
-    throw new Error(`Failed to get Sudoku puzzle: ${error.message}`);
+    puzzle.push(row);
   }
+  
+  return puzzle;
 }
 
 /**
  * Gets the answers from the answers sheet
  * @returns {Array<Array<number>>} The answers array
- * @throws {Error} If answers cannot be read from the sheet
  */
 function getAnswers() {
-  try {
-    const answersSheetName = getAnswersSheetName();
-    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(answersSheetName);
-    if (!sheet) {
-      throw new Error(`Sheet "${answersSheetName}" not found`);
-    }
-    
-    const gridSize = getGridSize();
-    const range = sheet.getRange(`A1:${String.fromCharCode(64 + gridSize)}${gridSize}`);
-    const values = range.getValues();
-    
-    // Validate that all values are numbers between 1 and gridSize
-    if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
-      throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
-    }
-    
-    return values;
-  } catch (error) {
-    throw new Error(`Failed to get answers: ${error.message}`);
+  const answersSheetName = getAnswersSheetName();
+  const gridSize = getGridSize();
+  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+  const values = getSheetData(answersSheetName, range);
+  
+  // Validate that all values are numbers between 1 and gridSize
+  if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
+    throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
   }
+  
+  return values;
 }
 
 /**
@@ -443,14 +462,11 @@ function createAnswersSheet(body) {
   const answers = getAnswers();
   
   // Create a row for each answer array
-  answers.forEach((row, index) => {
-    const paragraph = body.appendParagraph(``);
+  answers.forEach(row => {
+    const paragraph = body.appendParagraph('');
     row.forEach(value => {
       const url = getImageFromCell(value);
-      const image = getImageBlob(url);
-      const insertedImage = paragraph.appendInlineImage(image);
-      insertedImage.setWidth(IMAGE_CONFIG.content.width);
-      insertedImage.setHeight(IMAGE_CONFIG.content.height);
+      insertImage(paragraph, url);
     });
     body.appendParagraph(''); // Add spacing between rows
   });
@@ -462,8 +478,6 @@ function createAnswersSheet(body) {
 function main() {
   try {
     const body = createDocument('Mint Hulzo Coin');
-    
-    // Get the Sudoku puzzle from the sheet
     const puzzle = getSudokuPuzzle();
     
     outputRows(puzzle, body);
