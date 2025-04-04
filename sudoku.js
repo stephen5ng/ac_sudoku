@@ -365,10 +365,10 @@ function createReferencePage(body) {
  */
 function getAnswersSheetName() {
   const sheet = getSpreadsheet();
-  const sheetName = sheet.getRange(1, 2).getValue();
+  const sheetName = sheet.getRange(1, 3).getValue();
   
   if (!sheetName || typeof sheetName !== 'string') {
-    throw new Error('Cell B1 does not contain a valid sheet name');
+    throw new Error('Cell C1 does not contain a valid sheet name');
   }
   
   return sheetName;
@@ -485,10 +485,21 @@ function createSudokuGrid() {
       throw new Error(`${templateName} sheet not found`);
     }
 
-    // Get the shortname from column A
+    // Get the shortname from column A and longname from column B
     const shortname = getSpreadsheet().getRange(1, 1).getValue();
     if (!shortname || typeof shortname !== 'string') {
       throw new Error('Cell A1 does not contain a valid shortname');
+    }
+
+    const longname = getSpreadsheet().getRange(1, 2).getValue();
+    if (!longname || typeof longname !== 'string') {
+      throw new Error('Cell B1 does not contain a valid longname');
+    }
+
+    // Delete the sheet if it already exists
+    const existingSheet = spreadsheet.getSheetByName(shortname);
+    if (existingSheet) {
+      spreadsheet.deleteSheet(existingSheet);
     }
 
     // Create a copy of the template and name it using the shortname
@@ -506,8 +517,8 @@ function createSudokuGrid() {
     const row = templateRange.getRow();
     const col = templateRange.getColumn();
 
-    // Set the shortname in the corresponding cell of the new sheet
-    sudokuGrid.getRange(row, col).setValue(shortname);
+    // Set the longname in the corresponding cell of the new sheet
+    sudokuGrid.getRange(row, col).setValue(longname);
 
     // Get the answers sheet name and data
     const answersSheetName = getAnswersSheetName();
@@ -553,7 +564,13 @@ function createSudokuGrid() {
  */
 function main() {
   try {
-    const body = createDocument('Mint Hulzo Coin');
+    // Get the shortname from column A
+    const shortname = getSpreadsheet().getRange(1, 1).getValue();
+    if (!shortname || typeof shortname !== 'string') {
+      throw new Error('Cell A1 does not contain a valid shortname');
+    }
+
+    const body = createDocument(`Mint Hulzo Coin - ${shortname}`);
     const puzzle = getSudokuPuzzle();
     
     outputRows(puzzle, body);
