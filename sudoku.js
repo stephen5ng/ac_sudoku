@@ -75,16 +75,17 @@ function getSheetByName(sheetName) {
 }
 
 /**
- * Gets the grid size based on the number of images in the first row
+ * Gets the grid size based on the number of images in the specified row
+ * @param {number} row - The row number to check for images
  * @returns {number} The grid size (4 or 6)
  */
-function getGridSize() {
+function getGridSize(row) {
   const sheet = getSpreadsheet();
   let count = 0;
   
-  // Count images in the first row, starting from column D (index 4)
+  // Count images in the specified row, starting from column D (index 4)
   for (let i = 4; i <= 9; i++) {
-    const cell = sheet.getRange(1, i);
+    const cell = sheet.getRange(row, i);
     const formula = cell.getFormula();
     if (formula.toLowerCase().startsWith('=image(')) {
       count++;
@@ -101,7 +102,7 @@ function getGridSize() {
     return GRID_SIZE_6;
   }
   
-  throw new Error(`Invalid number of images found: ${count}. Expected 4 or 6 images.`);
+  throw new Error(`Invalid number of images found: ${count}. Expected 4 or 6 images in row ${row}.`);
 }
 
 /**
@@ -144,28 +145,32 @@ function insertImage(paragraph, url) {
 /**
  * Gets the image URL from a spreadsheet cell
  * @param {number} num - The number to map (1-6 or 1-4)
+ * @param {string} answersSheetName - The name of the answers sheet to determine grid size
+ * @param {number} row - The row number to get the image from
  * @returns {string} The image URL from the corresponding cell
  * @throws {Error} If the number is out of range, cell doesn't contain an image formula, or referenced cell is empty
  */
-function getImageFromCell(num) {
-  const gridSize = getGridSize();
+function getImageFromCell(num, answersSheetName, row) {
+  console.log(`getImageFromCell called with num=${num}, answersSheetName=${answersSheetName}, row=${row}`);
+  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
+  console.log(`Determined gridSize=${gridSize} from answersSheetName`);
   if (num < 1 || num > gridSize) {
-    throw new Error(`Invalid number: ${num}. Must be between 1 and ${gridSize}`);
+    throw new Error(`Invalid number: ${num}. Must be between 1 and ${gridSize} (answersSheetName=${answersSheetName})`);
   }
   
   const sheet = getSpreadsheet();
   // Add 3 to the column to account for the triple shift (A=shortname, B=longname, C=sheetname)
-  const cell = sheet.getRange(1, num + 3);
+  const cell = sheet.getRange(row, num + 3);
   const formula = cell.getFormula();
   
   if (!formula.toLowerCase().startsWith('=image(')) {
-    throw new Error(`Cell ${String.fromCharCode(65 + num + 2)}1 does not contain an image formula`);
+    throw new Error(`Cell ${String.fromCharCode(65 + num + 2)}${row} does not contain an image formula`);
   }
   
   // Extract the content from the formula (could be a URL or cell reference)
   const match = formula.match(/=image\(([^)]+)\)/i);
   if (!match) {
-    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 2)}1`);
+    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 2)}${row}`);
   }
   
   const content = match[1];
@@ -234,10 +239,11 @@ function createSectionHeader(body, text) {
 /**
  * Validates the sudoku array
  * @param {Array<Array<number|null>>} array - The sudoku array to validate
+ * @param {number} row - The row number to determine grid size
  * @throws {Error} If the array is invalid
  */
-function validateSudokuArray(array) {
-  const gridSize = getGridSize();
+function validateSudokuArray(array, row) {
+  const gridSize = getGridSize(row);
   if (!array || !Array.isArray(array) || array.length !== gridSize) {
     throw new Error(`Invalid array dimensions. Expected ${gridSize}x${gridSize}`);
   }
@@ -261,7 +267,7 @@ function getNonNullValues(array, boundaries) {
     for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
       if (array[i][j] !== null) {
         values.push({
-          url: getImageFromCell(array[i][j]),
+          url: getImageFromCell(array[i][j], getAnswersSheetName(i + 1), i + 1),
           value: array[i][j]
         });
       }
@@ -293,14 +299,16 @@ function outputSection(body, title, sections, prefix) {
  * Outputs rows to the document
  * @param {Array<Array<number|null>>} sudokuArray - The sudoku array
  * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {number} currentRow - The row number to get the answers from
  */
-function outputRows(sudokuArray, body) {
-  validateSudokuArray(sudokuArray);
-  const sections = sudokuArray.map(row => 
-    row
+function outputRows(sudokuArray, body, currentRow) {
+  console.log(`outputRows called with currentRow=${currentRow}, type=${typeof currentRow}`);
+  validateSudokuArray(sudokuArray, currentRow);
+  const sections = sudokuArray.map(sudokuRow => 
+    sudokuRow
       .map(value => {
         if (value === null) return null;
-        const url = getImageFromCell(value);
+        const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
         return url ? { url, value } : null;
       })
       .filter(Boolean)
@@ -312,16 +320,17 @@ function outputRows(sudokuArray, body) {
  * Outputs columns to the document
  * @param {Array<Array<number|null>>} sudokuArray - The sudoku array
  * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {number} currentRow - The row number to get the answers from
  */
-function outputColumns(sudokuArray, body) {
-  validateSudokuArray(sudokuArray);
-  const gridSize = getGridSize();
+function outputColumns(sudokuArray, body, currentRow) {
+  validateSudokuArray(sudokuArray, currentRow);
+  const gridSize = getGridSize(currentRow);
   const sections = Array.from({ length: gridSize }, (_, j) =>
     sudokuArray
-      .map(row => {
-        const value = row[j];
+      .map(sudokuRow => {
+        const value = sudokuRow[j];
         if (value === null) return null;
-        const url = getImageFromCell(value);
+        const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
         return url ? { url, value } : null;
       })
       .filter(Boolean)
@@ -333,10 +342,11 @@ function outputColumns(sudokuArray, body) {
  * Outputs groups to the document
  * @param {Array<Array<number|null>>} sudokuArray - The sudoku array
  * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {number} currentRow - The row number to get the answers from
  */
-function outputGroups(sudokuArray, body) {
-  validateSudokuArray(sudokuArray);
-  const gridSize = getGridSize();
+function outputGroups(sudokuArray, body, currentRow) {
+  validateSudokuArray(sudokuArray, currentRow);
+  const gridSize = getGridSize(currentRow);
   const groupBoundaries = getGroupBoundaries(gridSize);
   const sections = groupBoundaries.map(boundaries => {
     const values = [];
@@ -344,7 +354,7 @@ function outputGroups(sudokuArray, body) {
       for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
         const value = sudokuArray[i][j];
         if (value !== null) {
-          const url = getImageFromCell(value);
+          const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
           if (url) {
             values.push({ url, value });
           }
@@ -359,17 +369,18 @@ function outputGroups(sudokuArray, body) {
 /**
  * Creates a reference page with all images
  * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {number} row - The row number to get the images from
  */
-function createReferencePage(body) {
+function createReferencePage(body, row) {
   body.appendPageBreak();
   createSectionHeader(body, 'Reference Images');
   
-  const gridSize = getGridSize();
+  const gridSize = getGridSize(row);
   
   // Create a paragraph for each number (1-4 or 1-6)
   for (let num = 1; num <= gridSize; num++) {
     const paragraph = body.appendParagraph('');
-    const url = getImageFromCell(num);
+    const url = getImageFromCell(num, getAnswersSheetName(row), row);
     
     // Insert copies of the same image
     for (let i = 0; i < gridSize; i++) {
@@ -382,15 +393,21 @@ function createReferencePage(body) {
 
 /**
  * Gets the name of the answers sheet from the images sheet
+ * @param {number} row - The row number to get the sheet name from
  * @returns {string} The name of the answers sheet
  * @throws {Error} If the sheet name cannot be read
  */
-function getAnswersSheetName() {
+function getAnswersSheetName(row) {
+  console.log(`getAnswersSheetName called with row=${row}, type=${typeof row}`);
+  if (!row || typeof row !== 'number' || row < 1) {
+    throw new Error(`Invalid row number: ${row} (type: ${typeof row})`);
+  }
+  
   const sheet = getSpreadsheet();
-  const sheetName = sheet.getRange(1, 3).getValue();
+  const sheetName = sheet.getRange(row, 3).getValue();
   
   if (!sheetName || typeof sheetName !== 'string') {
-    throw new Error('Cell C1 does not contain a valid sheet name');
+    throw new Error(`Cell C${row} does not contain a valid sheet name`);
   }
   
   return sheetName;
@@ -412,11 +429,12 @@ function getSheetData(sheetName, range) {
 
 /**
  * Gets the Sudoku puzzle from the answers sheet
+ * @param {number} row - The row number to get the puzzle from
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
  */
-function getSudokuPuzzle() {
-  const answersSheetName = getAnswersSheetName();
-  const gridSize = getGridSize();
+function getSudokuPuzzle(row) {
+  const answersSheetName = getAnswersSheetName(row);
+  const gridSize = getGridSize(row);
   const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
   const values = getSheetData(answersSheetName, range);
   const sheet = getSheetByName(answersSheetName);
@@ -456,11 +474,12 @@ function getSudokuPuzzle() {
 
 /**
  * Gets the answers from the answers sheet
+ * @param {number} row - The row number to get the answers from
  * @returns {Array<Array<number>>} The answers array
  */
-function getAnswers() {
-  const answersSheetName = getAnswersSheetName();
-  const gridSize = getGridSize();
+function getAnswers(row) {
+  const answersSheetName = getAnswersSheetName(row);
+  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
   const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
   const values = getSheetData(answersSheetName, range);
   
@@ -475,19 +494,25 @@ function getAnswers() {
 /**
  * Creates the answers sheet with the complete solution
  * @param {GoogleAppsScript.Document.Body} body - The document body
+ * @param {number} row - The row number to get the answers from
  */
-function createAnswersSheet(body) {
+function createAnswersSheet(body, row) {
   body.appendPageBreak();
   createSectionHeader(body, 'Solution');
   
   // Get answers from the sheet
-  const answers = getAnswers();
+  const answersSheetName = getAnswersSheetName(row);
+  console.log(`createAnswersSheet: answersSheetName=${answersSheetName}, row=${row}`);
+  const answers = getAnswers(row);
+  console.log(`createAnswersSheet: answers=${JSON.stringify(answers)}`);
   
   // Create a row for each answer array
-  answers.forEach(row => {
+  answers.forEach((answerRow, index) => {
+    console.log(`Processing answer row ${index + 1}: ${JSON.stringify(answerRow)}`);
     const paragraph = body.appendParagraph('');
-    row.forEach(value => {
-      const url = getImageFromCell(value);
+    answerRow.forEach(value => {
+      console.log(`Processing value ${value} in row ${index + 1}`);
+      const url = getImageFromCell(value, answersSheetName, row);
       insertImage(paragraph, url);
     });
     body.appendParagraph(''); // Add spacing between rows
@@ -496,11 +521,12 @@ function createAnswersSheet(body) {
 
 /**
  * Creates a SudokuGrid sheet with X's for bold numbers
+ * @param {number} row - The row number to get the data from
  */
-function createSudokuGrid() {
+function createSudokuGrid(row) {
   try {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const gridSize = getGridSize();
+    const gridSize = getGridSize(row);
     const templateName = gridSize === GRID_SIZE_4 ? 'Template4' : 'Template6';
     const templateSheet = spreadsheet.getSheetByName(templateName);
     if (!templateSheet) {
@@ -508,14 +534,14 @@ function createSudokuGrid() {
     }
 
     // Get the shortname from column A and longname from column B
-    const shortname = getSpreadsheet().getRange(1, 1).getValue();
+    const shortname = getSpreadsheet().getRange(row, 1).getValue();
     if (!shortname || typeof shortname !== 'string') {
-      throw new Error('Cell A1 does not contain a valid shortname');
+      throw new Error(`Cell A${row} does not contain a valid shortname`);
     }
 
-    const longname = getSpreadsheet().getRange(1, 2).getValue();
+    const longname = getSpreadsheet().getRange(row, 2).getValue();
     if (!longname || typeof longname !== 'string') {
-      throw new Error('Cell B1 does not contain a valid longname');
+      throw new Error(`Cell B${row} does not contain a valid longname`);
     }
 
     // Delete the sheet if it already exists
@@ -536,17 +562,17 @@ function createSudokuGrid() {
     }
 
     // Get the cell coordinates from the template range
-    const row = templateRange.getRow();
-    const col = templateRange.getColumn();
+    const templateRow = templateRange.getRow();
+    const templateCol = templateRange.getColumn();
 
     // Set the longname in the corresponding cell of the new sheet
-    sudokuGrid.getRange(row, col).setValue(longname);
+    sudokuGrid.getRange(templateRow, templateCol).setValue(longname);
 
     // Get the answers sheet name and data
-    const answersSheetName = getAnswersSheetName();
+    const answersSheetName = getAnswersSheetName(row);
     const answersSheet = spreadsheet.getSheetByName(answersSheetName);
     if (!answersSheet) {
-      throw new Error(`Sheet "${answersSheetName}" not found`);
+      throw new Error(`Sheet "${answersSheetName}" not found for row ${row}`);
     }
 
     const answersRange = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
@@ -576,7 +602,7 @@ function createSudokuGrid() {
       }
     }
   } catch (error) {
-    console.error('Error creating SudokuGrid:', error.message);
+    console.error(`Error creating SudokuGrid for row ${row}:`, error.message);
     throw error;
   }
 }
@@ -586,21 +612,33 @@ function createSudokuGrid() {
  */
 function main() {
   try {
-    // Get the shortname from column A
-    const shortname = getSpreadsheet().getRange(1, 1).getValue();
-    if (!shortname || typeof shortname !== 'string') {
-      throw new Error('Cell A1 does not contain a valid shortname');
-    }
-
-    const body = createDocument(`Mint Hulzo Coin - ${shortname}`);
-    const puzzle = getSudokuPuzzle();
+    const sheet = getSpreadsheet();
+    const lastRow = sheet.getLastRow();
+    console.log(`Starting main with lastRow=${lastRow}`);
     
-    outputRows(puzzle, body);
-    outputColumns(puzzle, body);
-    outputGroups(puzzle, body);
-    createReferencePage(body);
-    createAnswersSheet(body);
-    createSudokuGrid();
+    // Process each row that has data
+    for (let row = 1; row <= lastRow; row++) {
+      console.log(`Processing row ${row} (type: ${typeof row})`);
+      // Check if this row has a shortname (column A)
+      const shortname = sheet.getRange(row, 1).getValue();
+      if (!shortname || typeof shortname !== 'string' || shortname.trim() === '') {
+        console.log(`Skipping row ${row} - no shortname found`);
+        continue; // Skip rows without a shortname
+      }
+      
+      console.log(`Processing row ${row} with shortname: ${shortname}`);
+      
+      // Create document for this row
+      const body = createDocument(`Mint Hulzo Coin - ${shortname}`);
+      const puzzle = getSudokuPuzzle(row);
+      
+      outputRows(puzzle, body, row);
+      outputColumns(puzzle, body, row);
+      outputGroups(puzzle, body, row);
+      createReferencePage(body, row);
+      createAnswersSheet(body, row);
+      createSudokuGrid(row);
+    }
   } catch (error) {
     console.error('Error processing sudoku:', error.message);
     throw error; // Re-throw to show in Apps Script execution log
