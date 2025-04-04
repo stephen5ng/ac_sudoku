@@ -82,8 +82,8 @@ function getGridSize() {
   const sheet = getSpreadsheet();
   let count = 0;
   
-  // Count images in the first row
-  for (let i = 1; i <= 6; i++) {
+  // Count images in the first row, starting from column C
+  for (let i = 3; i <= 8; i++) {
     const cell = sheet.getRange(1, i);
     const formula = cell.getFormula();
     if (formula.toLowerCase().startsWith('=image(')) {
@@ -93,7 +93,7 @@ function getGridSize() {
   
   // If we have 4 images followed by a sheet name, use 4x4 grid
   if (count === 4) {
-    const nextCell = sheet.getRange(1, 5).getValue();
+    const nextCell = sheet.getRange(1, 7).getValue();
     if (typeof nextCell === 'string' && nextCell.trim() !== '') {
       return GRID_SIZE_4;
     }
@@ -152,17 +152,18 @@ function getImageFromCell(num) {
   }
   
   const sheet = getSpreadsheet();
-  const cell = sheet.getRange(1, num);
+  // Add 2 to the column to account for the double shift
+  const cell = sheet.getRange(1, num + 2);
   const formula = cell.getFormula();
   
   if (!formula.toLowerCase().startsWith('=image(')) {
-    throw new Error(`Cell ${String.fromCharCode(65 + num)}1 does not contain an image formula`);
+    throw new Error(`Cell ${String.fromCharCode(65 + num + 1)}1 does not contain an image formula`);
   }
   
   // Extract the content from the formula (could be a URL or cell reference)
   const match = formula.match(/=image\(([^)]+)\)/i);
   if (!match) {
-    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num)}1`);
+    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 1)}1`);
   }
   
   const content = match[1];
@@ -364,11 +365,10 @@ function createReferencePage(body) {
  */
 function getAnswersSheetName() {
   const sheet = getSpreadsheet();
-  const gridSize = getGridSize();
-  const sheetName = sheet.getRange(1, gridSize + 1).getValue();
+  const sheetName = sheet.getRange(1, 2).getValue();
   
   if (!sheetName || typeof sheetName !== 'string') {
-    throw new Error(`Cell ${String.fromCharCode(65 + gridSize)}1 does not contain a valid sheet name`);
+    throw new Error('Cell B1 does not contain a valid sheet name');
   }
   
   return sheetName;
@@ -473,6 +473,82 @@ function createAnswersSheet(body) {
 }
 
 /**
+ * Creates a SudokuGrid sheet with X's for bold numbers
+ */
+function createSudokuGrid() {
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const gridSize = getGridSize();
+    const templateName = gridSize === GRID_SIZE_4 ? 'Template4' : 'Template6';
+    const templateSheet = spreadsheet.getSheetByName(templateName);
+    if (!templateSheet) {
+      throw new Error(`${templateName} sheet not found`);
+    }
+
+    // Get the shortname from column A
+    const shortname = getSpreadsheet().getRange(1, 1).getValue();
+    if (!shortname || typeof shortname !== 'string') {
+      throw new Error('Cell A1 does not contain a valid shortname');
+    }
+
+    // Create a copy of the template and name it using the shortname
+    const sudokuGrid = templateSheet.copyTo(spreadsheet);
+    sudokuGrid.setName(shortname);
+
+    // Get the named range from the spreadsheet to find the correct cell
+    const namedRange = gridSize === GRID_SIZE_4 ? 'Template4Name' : 'Template6Name';
+    const templateRange = spreadsheet.getRangeByName(namedRange);
+    if (!templateRange) {
+      throw new Error(`Named range "${namedRange}" not found`);
+    }
+
+    // Get the cell coordinates from the template range
+    const row = templateRange.getRow();
+    const col = templateRange.getColumn();
+
+    // Set the shortname in the corresponding cell of the new sheet
+    sudokuGrid.getRange(row, col).setValue(shortname);
+
+    // Get the answers sheet name and data
+    const answersSheetName = getAnswersSheetName();
+    const answersSheet = spreadsheet.getSheetByName(answersSheetName);
+    if (!answersSheet) {
+      throw new Error(`Sheet "${answersSheetName}" not found`);
+    }
+
+    const answersRange = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+    const values = answersSheet.getRange(answersRange).getValues();
+
+    // Process each cell in the answers sheet
+    for (let i = 0; i < gridSize; i++) {
+      for (let j = 0; j < gridSize; j++) {
+        const value = values[i][j];
+        
+        // Check if the cell is bold
+        let isBold = false;
+        try {
+          const cell = answersSheet.getRange(i + 1, j + 1);
+          const fontWeight = cell.getFontWeight();
+          isBold = fontWeight === "bold";
+        } catch (e) {
+          console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
+        }
+        
+        // If the cell is bold and contains a number, set the corresponding cell in SudokuGrid to 'X'
+        if (isBold && Number.isInteger(value) && value >= 1 && value <= gridSize) {
+          // Add 1 to row and column to account for the offset in SudokuGrid
+          const sudokuCell = sudokuGrid.getRange(i + 2, j + 2);
+          sudokuCell.setValue('X');
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error creating SudokuGrid:', error.message);
+    throw error;
+  }
+}
+
+/**
  * Main function to run all outputs
  */
 function main() {
@@ -485,6 +561,7 @@ function main() {
     outputGroups(puzzle, body);
     createReferencePage(body);
     createAnswersSheet(body);
+    createSudokuGrid();
   } catch (error) {
     console.error('Error processing sudoku:', error.message);
     throw error; // Re-throw to show in Apps Script execution log
