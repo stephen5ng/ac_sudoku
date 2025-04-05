@@ -55,6 +55,24 @@ const GROUP_BOUNDARIES_4 = [
 ];
 
 /**
+ * Gets or creates the "Generated Files" folder
+ * @returns {GoogleAppsScript.Drive.Folder} The folder where generated files should be stored
+ */
+function getGeneratedFilesFolder() {
+  const parentFolderId = DriveApp.getFileById(SpreadsheetApp.getActiveSpreadsheet().getId()).getParents().next().getId();
+  const parentFolder = DriveApp.getFolderById(parentFolderId);
+  
+  // Try to find existing "Generated Files" folder
+  const folderIterator = parentFolder.getFoldersByName('Generated Files');
+  if (folderIterator.hasNext()) {
+    return folderIterator.next();
+  }
+  
+  // Create new folder if it doesn't exist
+  return parentFolder.createFolder('Generated Files');
+}
+
+/**
  * Creates a custom menu in the spreadsheet when it opens
  */
 function onOpen() {
@@ -240,6 +258,16 @@ function createDocument(title) {
     const doc = DocumentApp.create(title);
     doc.setMarginTop(36);
     doc.setMarginBottom(18);
+    
+    // Move the document to the Generated Files folder
+    const folder = getGeneratedFilesFolder();
+    const docFile = DriveApp.getFileById(doc.getId());
+    const parents = docFile.getParents();
+    while (parents.hasNext()) {
+      parents.next().removeFile(docFile);
+    }
+    folder.addFile(docFile);
+    
     return doc.getBody();
   } catch (error) {
     throw new Error(`Failed to create document: ${error.message}`);
