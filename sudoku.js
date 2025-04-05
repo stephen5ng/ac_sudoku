@@ -106,20 +106,20 @@ function getGridSize(row) {
   const sheet = getSpreadsheet();
   let count = 0;
   
-  // Count images in the specified row, starting from column D (index 4)
-  for (let i = 4; i <= 9; i++) {
+  // Count images in the specified row, starting from column E (index 5)
+  for (let i = 5; i <= 10; i++) {
     const formula = sheet.getRange(row, i).getFormula();
     if (formula.toLowerCase().startsWith('=image(')) {
       count++;
     }
   }
   
-  // If we have 4 images in columns D-G, use 4x4 grid
+  // If we have 4 images in columns E-H, use 4x4 grid
   if (count === 4) {
     return GRID_SIZE_4;
   }
   
-  // If we have 6 images in columns D-I, use 6x6 grid
+  // If we have 6 images in columns E-J, use 6x6 grid
   if (count === 6) {
     return GRID_SIZE_6;
   }
@@ -181,18 +181,18 @@ function getImageFromCell(num, answersSheetName, row) {
   }
   
   const sheet = getSpreadsheet();
-  // Add 3 to the column to account for the triple shift (A=shortname, B=longname, C=sheetname)
-  const cell = sheet.getRange(row, num + 3);
+  // Add 4 to the column to account for the quadruple shift (A=shortname, B=longname, C=sheetname, D=new column)
+  const cell = sheet.getRange(row, num + 4);
   const formula = cell.getFormula();
   
   if (!formula.toLowerCase().startsWith('=image(')) {
-    throw new Error(`Cell ${String.fromCharCode(65 + num + 2)}${row} does not contain an image formula`);
+    throw new Error(`Cell ${String.fromCharCode(65 + num + 3)}${row} does not contain an image formula`);
   }
   
   // Extract the content from the formula (could be a URL or cell reference)
   const match = formula.match(/=image\(([^)]+)\)/i);
   if (!match) {
-    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 2)}${row}`);
+    throw new Error(`Invalid image formula in cell ${String.fromCharCode(65 + num + 3)}${row}`);
   }
   
   const content = match[1];
@@ -317,12 +317,74 @@ function outputSection(body, title, sections, prefix) {
 }
 
 /**
- * Gets the section title based on type and declaration mode
+ * Gets the invert value from the row
+ * @param {number} row - The row number to check
+ * @returns {boolean} Whether to invert the declarations
+ */
+function getInvertValue(row) {
+  const sheet = getSpreadsheet();
+  const value = sheet.getRange(row, 4).getValue(); // Column D is the invert column
+  return Boolean(value); // Convert any value to boolean
+}
+
+/**
+ * Gets the Sudoku puzzle from the answers sheet, returning either bold or non-bold numbers based on invert value
+ * @param {number} row - The row number to get the puzzle from
+ * @returns {Array<Array<number|null>>} The Sudoku puzzle array
+ */
+function getSudokuPuzzle(row) {
+  const answersSheetName = getAnswersSheetName(row);
+  const gridSize = getGridSize(row);
+  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+  const values = getSheetData(answersSheetName, range);
+  const sheet = getSheetByName(answersSheetName);
+  const shouldNegate = getInvertValue(row);
+  
+  // Create the Sudoku puzzle array
+  const puzzle = [];
+  
+  // Process each row
+  for (let i = 0; i < gridSize; i++) {
+    const row = [];
+    for (let j = 0; j < gridSize; j++) {
+      const value = values[i][j];
+      
+      // Check if the cell is bold by getting its font weight
+      let isBold = false;
+      try {
+        const cell = sheet.getRange(i + 1, j + 1);
+        const fontWeight = cell.getFontWeight();
+        isBold = fontWeight === "bold";
+      } catch (e) {
+        console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
+      }
+      
+      // If shouldNegate is false, we want non-bold numbers
+      // If shouldNegate is true, we want bold numbers
+      const shouldInclude = shouldNegate ? isBold : !isBold;
+      
+      // Include the value if it matches our criteria and is a valid number
+      if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
+        row.push(value);
+      } else {
+        row.push(null);
+      }
+    }
+    puzzle.push(row);
+  }
+  
+  return puzzle;
+}
+
+/**
+ * Gets the section title based on type and invert value
  * @param {string} sectionType - The type of section (ROWS, COLUMNS, GROUPS)
+ * @param {number} row - The row number to get the invert value from
  * @returns {string} The formatted section title
  */
-function getSectionTitle(sectionType) {
-  const declaration = NEGATE_DECLARATIONS ? MUST_NOT_CONTAIN : MAY_ONLY_CONTAIN;
+function getSectionTitle(sectionType, row) {
+  const shouldNegate = getInvertValue(row);
+  const declaration = shouldNegate ? MAY_ONLY_CONTAIN : MUST_NOT_CONTAIN;
   return `${sectionType} ${declaration}`;
 }
 
@@ -344,7 +406,7 @@ function outputRows(sudokuArray, body, currentRow) {
       })
       .filter(Boolean)
   );
-  outputSection(body, getSectionTitle(SECTION_TYPES.ROWS), sections, 'ROW');
+  outputSection(body, getSectionTitle(SECTION_TYPES.ROWS, currentRow), sections, 'ROW');
 }
 
 /**
@@ -366,7 +428,7 @@ function outputColumns(sudokuArray, body, currentRow) {
       })
       .filter(Boolean)
   );
-  outputSection(body, getSectionTitle(SECTION_TYPES.COLUMNS), sections, 'COLUMN');
+  outputSection(body, getSectionTitle(SECTION_TYPES.COLUMNS, currentRow), sections, 'COLUMN');
 }
 
 /**
@@ -394,7 +456,7 @@ function outputGroups(sudokuArray, body, currentRow) {
     }
     return values;
   });
-  outputSection(body, getSectionTitle(SECTION_TYPES.GROUPS), sections, 'GROUP');
+  outputSection(body, getSectionTitle(SECTION_TYPES.GROUPS, currentRow), sections, 'GROUP');
 }
 
 /**
@@ -430,8 +492,8 @@ function createReferencePage(body, row) {
  */
 function getAnswersSheetName(row) {
   console.log(`getAnswersSheetName called with row=${row}, type=${typeof row}`);
-  if (!row || typeof row !== 'number' || row < 1) {
-    throw new Error(`Invalid row number: ${row} (type: ${typeof row})`);
+  if (!row || typeof row !== 'number' || row < 2) {
+    throw new Error(`Invalid row number: ${row} (type: ${typeof row}). Must be row 2 or greater.`);
   }
   
   const sheet = getSpreadsheet();
@@ -460,73 +522,6 @@ function getSheetData(sheetName, range) {
   } catch (error) {
     throw new Error(`Failed to get data from range "${range}" in sheet "${sheetName}": ${error.message}`);
   }
-}
-
-/**
- * Gets the Sudoku puzzle from the answers sheet, returning either bold or non-bold numbers based on NEGATE_DECLARATIONS
- * @param {number} row - The row number to get the puzzle from
- * @returns {Array<Array<number|null>>} The Sudoku puzzle array
- */
-function getSudokuPuzzle(row) {
-  const answersSheetName = getAnswersSheetName(row);
-  const gridSize = getGridSize(row);
-  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
-  const values = getSheetData(answersSheetName, range);
-  const sheet = getSheetByName(answersSheetName);
-  
-  // Create the Sudoku puzzle array
-  const puzzle = [];
-  
-  // Process each row
-  for (let i = 0; i < gridSize; i++) {
-    const row = [];
-    for (let j = 0; j < gridSize; j++) {
-      const value = values[i][j];
-      
-      // Check if the cell is bold by getting its font weight
-      let isBold = false;
-      try {
-        const cell = sheet.getRange(i + 1, j + 1);
-        const fontWeight = cell.getFontWeight();
-        isBold = fontWeight === "bold";
-      } catch (e) {
-        console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
-      }
-      
-      // If NEGATE_DECLARATIONS is false, we want non-bold numbers
-      // If NEGATE_DECLARATIONS is true, we want bold numbers (original behavior)
-      const shouldInclude = NEGATE_DECLARATIONS ? isBold : !isBold;
-      
-      // Include the value if it matches our criteria and is a valid number
-      if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
-        row.push(value);
-      } else {
-        row.push(null);
-      }
-    }
-    puzzle.push(row);
-  }
-  
-  return puzzle;
-}
-
-/**
- * Gets the answers from the answers sheet
- * @param {number} row - The row number to get the answers from
- * @returns {Array<Array<number>>} The answers array
- */
-function getAnswers(row) {
-  const answersSheetName = getAnswersSheetName(row);
-  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
-  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
-  const values = getSheetData(answersSheetName, range);
-  
-  // Validate that all values are numbers between 1 and gridSize
-  if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
-    throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
-  }
-  
-  return values;
 }
 
 /**
@@ -646,6 +641,25 @@ function createSudokuGrid(row) {
 }
 
 /**
+ * Gets the answers from the answers sheet
+ * @param {number} row - The row number to get the answers from
+ * @returns {Array<Array<number>>} The answers array
+ */
+function getAnswers(row) {
+  const answersSheetName = getAnswersSheetName(row);
+  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
+  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+  const values = getSheetData(answersSheetName, range);
+  
+  // Validate that all values are numbers between 1 and gridSize
+  if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
+    throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
+  }
+  
+  return values;
+}
+
+/**
  * Main function to run all outputs
  */
 function main() {
@@ -654,8 +668,8 @@ function main() {
     const lastRow = sheet.getLastRow();
     console.log(`Starting main with lastRow=${lastRow}`);
     
-    // Process each row until we hit an empty row
-    for (let row = 1; row <= lastRow; row++) {
+    // Process each row until we hit an empty row, starting after the header
+    for (let row = 2; row <= lastRow; row++) {
       console.log(`Processing row ${row} (type: ${typeof row})`);
       // Check if this row has a shortname (column A)
       const shortname = sheet.getRange(row, 1).getValue();
