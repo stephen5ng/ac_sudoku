@@ -49,14 +49,18 @@ const GROUP_BOUNDARIES_4 = [
 ];
 
 /**
- * Gets the active spreadsheet
- * @returns {GoogleAppsScript.Spreadsheet.Sheet} The active sheet
+ * Gets the Sudokus sheet
+ * @returns {GoogleAppsScript.Spreadsheet.Sheet} The Sudokus sheet
  */
 function getSpreadsheet() {
   try {
-    return SpreadsheetApp.openById(SPREADSHEET_ID).getActiveSheet();
+    const sheet = SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName('Sudokus');
+    if (!sheet) {
+      throw new Error('Sudokus sheet not found');
+    }
+    return sheet;
   } catch (error) {
-    throw new Error(`Failed to access spreadsheet: ${error.message}`);
+    throw new Error(`Failed to access Sudokus sheet: ${error.message}`);
   }
 }
 
@@ -399,7 +403,7 @@ function createReferencePage(body, row) {
 }
 
 /**
- * Gets the name of the answers sheet from the images sheet
+ * Gets the name of the answers sheet from the Sudokus sheet
  * @param {number} row - The row number to get the sheet name from
  * @returns {string} The name of the answers sheet
  * @throws {Error} If the sheet name cannot be read
