@@ -4,6 +4,12 @@ const GRID_SIZE_4 = 4;
 const SPREADSHEET_ID = '1t9mwKfa_aPzJwx6qUOgO54N9-1XBQJGCPKY3PpwF-BE';
 const NEGATE_DECLARATIONS = false;
 
+// Menu configuration
+const MENU_NAME = 'Sudoku';
+const MENU_ITEMS = [
+  {name: 'Generate All Puzzles', functionName: 'main'}
+];
+
 // Section title text
 const MUST_NOT_CONTAIN = 'must not contain any of these values';
 const MAY_ONLY_CONTAIN = 'may only contain one of these values';
@@ -47,6 +53,20 @@ const GROUP_BOUNDARIES_4 = [
   { rowStart: 2, rowEnd: 3, colStart: 0, colEnd: 1 }, // Group 3 (bottom left)
   { rowStart: 2, rowEnd: 3, colStart: 2, colEnd: 3 }, // Group 4 (bottom right)
 ];
+
+/**
+ * Creates a custom menu in the spreadsheet when it opens
+ */
+function onOpen() {
+  try {
+    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const menu = spreadsheet.createMenu(MENU_NAME);
+    MENU_ITEMS.forEach(item => menu.addItem(item.name, item.functionName));
+    menu.addToUi();
+  } catch (error) {
+    console.error(`Failed to create menu: ${error.message}`);
+  }
+}
 
 /**
  * Gets the Sudokus sheet
