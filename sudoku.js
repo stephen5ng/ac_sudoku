@@ -2,6 +2,18 @@
 const GRID_SIZE_6 = 6;
 const GRID_SIZE_4 = 4;
 const SPREADSHEET_ID = '1t9mwKfa_aPzJwx6qUOgO54N9-1XBQJGCPKY3PpwF-BE';
+const NEGATE_DECLARATIONS = false;
+
+// Section title text
+const MUST_NOT_CONTAIN = 'must not contain any of these values';
+const MAY_ONLY_CONTAIN = 'may only contain one of these values';
+
+// Section types
+const SECTION_TYPES = {
+  ROWS: 'ROWS',
+  COLUMNS: 'COLUMNS',
+  GROUPS: 'GROUPS'
+};
 
 // Image configuration
 const IMAGE_CONFIG = {
@@ -37,29 +49,15 @@ const GROUP_BOUNDARIES_4 = [
 ];
 
 /**
- * Helper function to handle spreadsheet errors
- * @param {Function} operation - The operation to perform
- * @param {string} errorMessage - The error message prefix
- * @returns {any} The result of the operation
- * @throws {Error} If the operation fails
- */
-function handleSpreadsheetError(operation, errorMessage) {
-  try {
-    return operation();
-  } catch (error) {
-    throw new Error(`${errorMessage}: ${error.message}`);
-  }
-}
-
-/**
  * Gets the active spreadsheet
  * @returns {GoogleAppsScript.Spreadsheet.Sheet} The active sheet
  */
 function getSpreadsheet() {
-  return handleSpreadsheetError(
-    () => SpreadsheetApp.openById(SPREADSHEET_ID).getActiveSheet(),
-    'Failed to access spreadsheet'
-  );
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID).getActiveSheet();
+  } catch (error) {
+    throw new Error(`Failed to access spreadsheet: ${error.message}`);
+  }
 }
 
 /**
@@ -68,10 +66,11 @@ function getSpreadsheet() {
  * @returns {GoogleAppsScript.Spreadsheet.Sheet} The sheet
  */
 function getSheetByName(sheetName) {
-  return handleSpreadsheetError(
-    () => SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName),
-    `Failed to access sheet "${sheetName}"`
-  );
+  try {
+    return SpreadsheetApp.openById(SPREADSHEET_ID).getSheetByName(sheetName);
+  } catch (error) {
+    throw new Error(`Failed to access sheet "${sheetName}": ${error.message}`);
+  }
 }
 
 /**
@@ -85,8 +84,7 @@ function getGridSize(row) {
   
   // Count images in the specified row, starting from column D (index 4)
   for (let i = 4; i <= 9; i++) {
-    const cell = sheet.getRange(row, i);
-    const formula = cell.getFormula();
+    const formula = sheet.getRange(row, i).getFormula();
     if (formula.toLowerCase().startsWith('=image(')) {
       count++;
     }
@@ -214,15 +212,14 @@ function getImageFromCell(num, answersSheetName, row) {
  * @returns {GoogleAppsScript.Document.Body} The document body
  */
 function createDocument(title) {
-  return handleSpreadsheetError(
-    () => {
-      const doc = DocumentApp.create(title);
-      doc.setMarginTop(36);
-      doc.setMarginBottom(18);
-      return doc.getBody();
-    },
-    'Failed to create document'
-  );
+  try {
+    const doc = DocumentApp.create(title);
+    doc.setMarginTop(36);
+    doc.setMarginBottom(18);
+    return doc.getBody();
+  } catch (error) {
+    throw new Error(`Failed to create document: ${error.message}`);
+  }
 }
 
 /**
@@ -296,6 +293,16 @@ function outputSection(body, title, sections, prefix) {
 }
 
 /**
+ * Gets the section title based on type and declaration mode
+ * @param {string} sectionType - The type of section (ROWS, COLUMNS, GROUPS)
+ * @returns {string} The formatted section title
+ */
+function getSectionTitle(sectionType) {
+  const declaration = NEGATE_DECLARATIONS ? MUST_NOT_CONTAIN : MAY_ONLY_CONTAIN;
+  return `${sectionType} ${declaration}`;
+}
+
+/**
  * Outputs rows to the document
  * @param {Array<Array<number|null>>} sudokuArray - The sudoku array
  * @param {GoogleAppsScript.Document.Body} body - The document body
@@ -313,7 +320,7 @@ function outputRows(sudokuArray, body, currentRow) {
       })
       .filter(Boolean)
   );
-  outputSection(body, 'ROWS must not contain any of these values', sections, 'ROW');
+  outputSection(body, getSectionTitle(SECTION_TYPES.ROWS), sections, 'ROW');
 }
 
 /**
@@ -335,7 +342,7 @@ function outputColumns(sudokuArray, body, currentRow) {
       })
       .filter(Boolean)
   );
-  outputSection(body, 'COLUMNS must not contain any of these values', sections, 'COLUMN');
+  outputSection(body, getSectionTitle(SECTION_TYPES.COLUMNS), sections, 'COLUMN');
 }
 
 /**
@@ -363,7 +370,7 @@ function outputGroups(sudokuArray, body, currentRow) {
     }
     return values;
   });
-  outputSection(body, 'GROUPS must not contain any of these values', sections, 'GROUP');
+  outputSection(body, getSectionTitle(SECTION_TYPES.GROUPS), sections, 'GROUP');
 }
 
 /**
@@ -420,15 +427,19 @@ function getAnswersSheetName(row) {
  * @returns {Array<Array<any>>} The data from the range
  */
 function getSheetData(sheetName, range) {
-  const sheet = getSheetByName(sheetName);
-  if (!sheet) {
-    throw new Error(`Sheet "${sheetName}" not found`);
+  try {
+    const sheet = getSheetByName(sheetName);
+    if (!sheet) {
+      throw new Error(`Sheet "${sheetName}" not found`);
+    }
+    return sheet.getRange(range).getValues();
+  } catch (error) {
+    throw new Error(`Failed to get data from range "${range}" in sheet "${sheetName}": ${error.message}`);
   }
-  return sheet.getRange(range).getValues();
 }
 
 /**
- * Gets the Sudoku puzzle from the answers sheet
+ * Gets the Sudoku puzzle from the answers sheet, returning either bold or non-bold numbers based on NEGATE_DECLARATIONS
  * @param {number} row - The row number to get the puzzle from
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
  */
@@ -458,9 +469,12 @@ function getSudokuPuzzle(row) {
         console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
       }
       
-      // If the cell is bold and contains a number between 1 and gridSize, use it
-      // Otherwise, use null
-      if (isBold && Number.isInteger(value) && value >= 1 && value <= gridSize) {
+      // If NEGATE_DECLARATIONS is false, we want non-bold numbers
+      // If NEGATE_DECLARATIONS is true, we want bold numbers (original behavior)
+      const shouldInclude = NEGATE_DECLARATIONS ? isBold : !isBold;
+      
+      // Include the value if it matches our criteria and is a valid number
+      if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
         row.push(value);
       } else {
         row.push(null);
