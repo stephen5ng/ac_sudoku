@@ -7,7 +7,7 @@ const NEGATE_DECLARATIONS = false;
 // Menu configuration
 const MENU_NAME = 'Sudoku';
 const MENU_ITEMS = [
-  {name: 'Generate All Puzzles', functionName: 'main'}
+  {name: 'Generate Puzzles', functionName: 'main'}
 ];
 
 // Section title text
@@ -59,8 +59,8 @@ const GROUP_BOUNDARIES_4 = [
  */
 function onOpen() {
   try {
-    const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
-    const menu = spreadsheet.createMenu(MENU_NAME);
+    const ui = SpreadsheetApp.getUi();
+    const menu = ui.createMenu(MENU_NAME);
     MENU_ITEMS.forEach(item => menu.addItem(item.name, item.functionName));
     menu.addToUi();
   } catch (error) {
@@ -654,14 +654,14 @@ function main() {
     const lastRow = sheet.getLastRow();
     console.log(`Starting main with lastRow=${lastRow}`);
     
-    // Process each row that has data
+    // Process each row until we hit an empty row
     for (let row = 1; row <= lastRow; row++) {
       console.log(`Processing row ${row} (type: ${typeof row})`);
       // Check if this row has a shortname (column A)
       const shortname = sheet.getRange(row, 1).getValue();
       if (!shortname || typeof shortname !== 'string' || shortname.trim() === '') {
-        console.log(`Skipping row ${row} - no shortname found`);
-        continue; // Skip rows without a shortname
+        console.log(`Stopping at row ${row} - no shortname found`);
+        break; // Stop processing when we hit an empty row
       }
       
       console.log(`Processing row ${row} with shortname: ${shortname}`);
