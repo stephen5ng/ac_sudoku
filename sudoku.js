@@ -398,7 +398,7 @@ function getSudokuPuzzle(row) {
       
       // If shouldNegate is false, we want non-bold numbers
       // If shouldNegate is true, we want bold numbers
-      const shouldInclude = shouldNegate ? isBold : !isBold;
+      const shouldInclude = ! shouldNegate ? isBold : !isBold;
       
       // Include the value if it matches our criteria and is a valid number
       if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
@@ -595,7 +595,9 @@ function createAnswersSheet(body, row) {
  */
 function createSudokuGrid(row) {
   try {
+    const targetSpreadsheetId = '1JB2VLOx1DuzSHr4FdMfGfLMmaXiXkGxb1jM3_SwZStM';
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
+    const targetSpreadsheet = SpreadsheetApp.openById(targetSpreadsheetId);
     const gridSize = getGridSize(row);
     const templateName = gridSize === GRID_SIZE_4 ? 'Template4' : 'Template6';
     const templateSheet = spreadsheet.getSheetByName(templateName);
@@ -614,14 +616,14 @@ function createSudokuGrid(row) {
       throw new Error(`Cell B${row} does not contain a valid longname`);
     }
 
-    // Delete the sheet if it already exists
-    const existingSheet = spreadsheet.getSheetByName(shortname);
+    // Delete the sheet if it already exists in the target spreadsheet
+    const existingSheet = targetSpreadsheet.getSheetByName(shortname);
     if (existingSheet) {
-      spreadsheet.deleteSheet(existingSheet);
+      targetSpreadsheet.deleteSheet(existingSheet);
     }
 
-    // Create a copy of the template and name it using the shortname
-    const sudokuGrid = templateSheet.copyTo(spreadsheet);
+    // Create a copy of the template in the target spreadsheet
+    const sudokuGrid = templateSheet.copyTo(targetSpreadsheet);
     sudokuGrid.setName(shortname);
 
     // Get the named range from the spreadsheet to find the correct cell
