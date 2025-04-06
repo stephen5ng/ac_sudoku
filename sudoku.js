@@ -2,7 +2,6 @@
 const GRID_SIZE_6 = 6;
 const GRID_SIZE_4 = 4;
 const SPREADSHEET_ID = '1t9mwKfa_aPzJwx6qUOgO54N9-1XBQJGCPKY3PpwF-BE';
-const NEGATE_DECLARATIONS = false;
 
 // Menu configuration
 const MENU_NAME = 'Sudoku';
@@ -354,18 +353,18 @@ function outputSection(body, title, sections, prefix) {
 }
 
 /**
- * Gets the invert value from the row
+ * Gets whether the puzzle may only contain the specified values
  * @param {number} row - The row number to check
- * @returns {boolean} Whether to invert the declarations
+ * @returns {boolean} Whether the puzzle may only contain the specified values
  */
-function getInvertValue(row) {
+function getMayOnlyContain(row) {
   const sheet = getSpreadsheet();
-  const value = sheet.getRange(row, 4).getValue(); // Column D is the invert column
+  const value = sheet.getRange(row, 4).getValue(); // Column D is the mayOnlyContain column
   return Boolean(value); // Convert any value to boolean
 }
 
 /**
- * Gets the Sudoku puzzle from the answers sheet, returning either bold or non-bold numbers based on invert value
+ * Gets the Sudoku puzzle from the answers sheet, returning either the specified or non-specified values based on mayOnlyContain value
  * @param {number} row - The row number to get the puzzle from
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
  */
@@ -375,7 +374,7 @@ function getSudokuPuzzle(row) {
   const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
   const values = getSheetData(answersSheetName, range);
   const sheet = getSheetByName(answersSheetName);
-  const shouldNegate = getInvertValue(row);
+  const mayOnlyContain = getMayOnlyContain(row);
   
   // Create the Sudoku puzzle array
   const puzzle = [];
@@ -386,19 +385,19 @@ function getSudokuPuzzle(row) {
     for (let j = 0; j < gridSize; j++) {
       const value = values[i][j];
       
-      // Check if the cell is bold by getting its font weight
-      let isBold = false;
+      // Check if the cell is specified by getting its font weight
+      let isSpecified = false;
       try {
         const cell = sheet.getRange(i + 1, j + 1);
         const fontWeight = cell.getFontWeight();
-        isBold = fontWeight === "bold";
+        isSpecified = fontWeight === "bold";
       } catch (e) {
         console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
       }
       
-      // If shouldNegate is false, we want non-bold numbers
-      // If shouldNegate is true, we want bold numbers
-      const shouldInclude = ! shouldNegate ? isBold : !isBold;
+      // If mayOnlyContain is true, we want specified values
+      // If mayOnlyContain is false, we want non-specified values
+      const shouldInclude = mayOnlyContain ? isSpecified : !isSpecified;
       
       // Include the value if it matches our criteria and is a valid number
       if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
@@ -414,14 +413,14 @@ function getSudokuPuzzle(row) {
 }
 
 /**
- * Gets the section title based on type and invert value
+ * Gets the section title based on type and mayOnlyContain value
  * @param {string} sectionType - The type of section (ROWS, COLUMNS, GROUPS)
- * @param {number} row - The row number to get the invert value from
+ * @param {number} row - The row number to get the mayOnlyContain value from
  * @returns {string} The formatted section title
  */
 function getSectionTitle(sectionType, row) {
-  const shouldNegate = getInvertValue(row);
-  const declaration = shouldNegate ? MAY_ONLY_CONTAIN : MUST_NOT_CONTAIN;
+  const mayOnlyContain = getMayOnlyContain(row);
+  const declaration = mayOnlyContain ? MAY_ONLY_CONTAIN : MUST_NOT_CONTAIN;
   return `${sectionType} ${declaration}`;
 }
 
