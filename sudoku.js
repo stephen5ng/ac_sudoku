@@ -126,8 +126,12 @@ function getGridSize(row) {
   
   // Count images in the specified row, starting from column E (index 5)
   for (let i = 5; i <= 10; i++) {
-    const formula = sheet.getRange(row, i).getFormula();
-    if (formula.toLowerCase().startsWith('=image(')) {
+    const cell = sheet.getRange(row, i);
+    const value = cell.getValue();
+    const formula = cell.getFormula();
+    
+    // Count if cell is an image or has an image formula
+    if (String(value) == "CellImage" || formula.toLowerCase().startsWith('=image(')) {
       count++;
     }
   }
@@ -201,8 +205,13 @@ function getImageFromCell(num, answersSheetName, row) {
   const sheet = getSpreadsheet();
   // Add 4 to the column to account for the quadruple shift (A=shortname, B=longname, C=sheetname, D=new column)
   const cell = sheet.getRange(row, num + 4);
-  const formula = cell.getFormula();
   
+  // Check if the cell contains an image
+  const formula = cell.getFormula();
+  if (formula == "") {
+    return cell.getValue().getContentUrl();
+}
+
   if (!formula.toLowerCase().startsWith('=image(')) {
     throw new Error(`Cell ${String.fromCharCode(65 + num + 3)}${row} does not contain an image formula`);
   }
