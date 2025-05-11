@@ -1,6 +1,4 @@
 // Constants
-const GRID_SIZE_6 = 6;
-const GRID_SIZE_4 = 4;
 const SPREADSHEET_ID = '1t9mwKfa_aPzJwx6qUOgO54N9-1XBQJGCPKY3PpwF-BE';
 
 // Menu configuration
@@ -50,7 +48,20 @@ const GROUP_BOUNDARIES_4 = [
   { rowStart: 0, rowEnd: 1, colStart: 0, colEnd: 1 }, // Group 1 (top left)
   { rowStart: 0, rowEnd: 1, colStart: 2, colEnd: 3 }, // Group 2 (top right)
   { rowStart: 2, rowEnd: 3, colStart: 0, colEnd: 1 }, // Group 3 (bottom left)
-  { rowStart: 2, rowEnd: 3, colStart: 2, colEnd: 3 }, // Group 4 (bottom right)
+  { rowStart: 2, rowEnd: 3, colStart: 2, colEnd: 3 }  // Group 4 (bottom right)
+];
+
+// Group boundaries for 9x9 grid with 3x3 groups
+const GROUP_BOUNDARIES_9 = [
+  { rowStart: 0, rowEnd: 2, colStart: 0, colEnd: 2 },   // Group 1 (top left)
+  { rowStart: 0, rowEnd: 2, colStart: 3, colEnd: 5 },   // Group 2 (top middle)
+  { rowStart: 0, rowEnd: 2, colStart: 6, colEnd: 8 },   // Group 3 (top right)
+  { rowStart: 3, rowEnd: 5, colStart: 0, colEnd: 2 },   // Group 4 (middle left)
+  { rowStart: 3, rowEnd: 5, colStart: 3, colEnd: 5 },   // Group 5 (center)
+  { rowStart: 3, rowEnd: 5, colStart: 6, colEnd: 8 },   // Group 6 (middle right)
+  { rowStart: 6, rowEnd: 8, colStart: 0, colEnd: 2 },   // Group 7 (bottom left)
+  { rowStart: 6, rowEnd: 8, colStart: 3, colEnd: 5 },   // Group 8 (bottom middle)
+  { rowStart: 6, rowEnd: 8, colStart: 6, colEnd: 8 }    // Group 9 (bottom right)
 ];
 
 /**
@@ -115,46 +126,43 @@ function getSheetByName(sheetName) {
 }
 
 /**
- * Gets the grid size based on the number of images in the specified row
- * @param {number} row - The row number to check for images
- * @returns {number} The grid size (4 or 6)
+ * Gets the grid size based on the answers sheet name
+ * @param {number} row - The row number to get the sheet info from
+ * @returns {number} The grid size (4, 6, or 9)
  */
 function getGridSize(row) {
-  const sheet = getSpreadsheet();
-  let count = 0;
+  const { sheetName } = getAnswersSheetInfo(row);
   
-  // Count images in the specified row, starting from column E (index 5)
-  for (let i = 5; i <= 10; i++) {
-    const cell = sheet.getRange(row, i);
-    const value = cell.getValue();
-    const formula = cell.getFormula();
-    
-    // Count if cell is an image or has an image formula
-    if (String(value) == "CellImage" || formula.toLowerCase().startsWith('=image(')) {
-      count++;
-    }
+  // Extract number after "Answers" (e.g. "Answers9!B2" -> 9)
+  const match = sheetName.match(/^Answers(\d+)/);
+  if (!match) {
+    throw new Error(`Invalid answers sheet name format: ${sheetName}. Expected format: "Answers<size>..."`);
   }
   
-  // If we have 4 images in columns E-H, use 4x4 grid
-  if (count === 4) {
-    return GRID_SIZE_4;
+  const size = parseInt(match[1]);
+  if (size !== 4 && size !== 6 && size !== 9) {
+    throw new Error(`Invalid grid size: ${size}. Must be 4, 6, or 9.`);
   }
   
-  // If we have 6 images in columns E-J, use 6x6 grid
-  if (count === 6) {
-    return GRID_SIZE_6;
-  }
-  
-  throw new Error(`Invalid number of images found: ${count}. Expected 4 or 6 images in row ${row}.`);
+  return size;
 }
 
 /**
  * Gets the group boundaries based on the grid size
- * @param {number} gridSize - The grid size (4 or 6)
+ * @param {number} gridSize - The grid size (4, 6, or 9)
  * @returns {Array<Object>} The group boundaries
  */
 function getGroupBoundaries(gridSize) {
-  return gridSize === GRID_SIZE_4 ? GROUP_BOUNDARIES_4 : GROUP_BOUNDARIES_6;
+  switch (gridSize) {
+    case 4:
+      return GROUP_BOUNDARIES_4;
+    case 6:
+      return GROUP_BOUNDARIES_6;
+    case 9:
+      return GROUP_BOUNDARIES_9;
+    default:
+      throw new Error(`Invalid grid size: ${gridSize}. Must be 4, 6, or 9.`);
+  }
 }
 
 /**
@@ -208,7 +216,6 @@ function insertImage(paragraph, url) {
  * @throws {Error} If the sheet info cannot be read
  */
 function getAnswersSheetInfo(row) {
-  console.log(`getAnswersSheetInfo called with row=${row}, type=${typeof row}`);
   if (!row || typeof row !== 'number' || row < 2) {
     throw new Error(`Invalid row number: ${row} (type: ${typeof row}). Must be row 2 or greater.`);
   }
@@ -230,6 +237,25 @@ function getAnswersSheetInfo(row) {
 }
 
 /**
+ * Gets the range for a grid starting from a given cell
+ * @param {string} startCell - The starting cell reference (e.g. "A1")
+ * @param {number} gridSize - The size of the grid (4, 6, or 9)
+ * @returns {{range: string, startRow: number, startCol: string}} Object containing the range and starting coordinates
+ */
+function getGridRange(startCell, gridSize) {
+  // Parse the starting cell to get row and column offsets
+  const startCol = startCell.match(/[A-Z]+/)[0];
+  const startRow = parseInt(startCell.match(/\d+/)[0]);
+  
+  // Calculate the end cell based on grid size and starting position
+  const endCol = String.fromCharCode(startCol.charCodeAt(0) + gridSize - 1);
+  const endRow = startRow + gridSize - 1;
+  const range = `${startCell}:${endCol}${endRow}`;
+  
+  return { range, startRow, startCol };
+}
+
+/**
  * Gets the image URL from a spreadsheet cell
  * @param {number} num - The number to map (1-6 or 1-4)
  * @param {string} answersSheetName - The name of the answers sheet to determine grid size
@@ -240,8 +266,7 @@ function getAnswersSheetInfo(row) {
 function getImageFromCell(num, row) {
   console.log(`getImageFromCell called with num=${num}, row=${row}`);
   const { sheetName: answersSheetName } = getAnswersSheetInfo(row);
-  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
-  console.log(`Determined gridSize=${gridSize} from answersSheetName`);
+  const gridSize = answersSheetName.includes('6') ? 6 : answersSheetName.includes('4') ? 4 : 9;
   if (num < 1 || num > gridSize) {
     throw new Error(`Invalid number: ${num}. Must be between 1 and ${gridSize} (answersSheetName=${answersSheetName})`);
   }
@@ -416,17 +441,8 @@ function getMayOnlyContain(row) {
  * @returns {Array<Array<number>>} The answers array
  */
 function getAnswers(answersSheetName, startCell) {
-  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
-  
-  // Parse the starting cell to get row and column offsets
-  const startCol = startCell.match(/[A-Z]+/)[0];
-  const startRow = parseInt(startCell.match(/\d+/)[0]);
-  
-  // Calculate the end cell based on grid size and starting position
-  const endCol = String.fromCharCode(startCol.charCodeAt(0) + gridSize - 1);
-  const endRow = startRow + gridSize - 1;
-  const range = `${startCell}:${endCol}${endRow}`;
-  
+  const gridSize = answersSheetName.includes('6') ? 6 : answersSheetName.includes('4') ? 4 : 9;
+  const { range } = getGridRange(startCell, gridSize);
   const values = getSheetData(answersSheetName, range);
   
   // Validate that all values are numbers between 1 and gridSize
@@ -461,7 +477,8 @@ function getSudokuPuzzle(row) {
   
   // Create the Sudoku puzzle array
   const puzzle = [];
-  
+  // Log grid size for debugging
+  console.log(`Grid size: ${gridSize}`);
   // Process each row
   for (let i = 0; i < gridSize; i++) {
     const row = [];
@@ -481,7 +498,7 @@ function getSudokuPuzzle(row) {
       
       // If mayOnlyContain is true, we want specified values
       // If mayOnlyContain is false, we want non-specified values
-      const shouldInclude = mayOnlyContain ? isSpecified : !isSpecified;
+      const shouldInclude = mayOnlyContain ? !isSpecified : isSpecified;
       
       // Include the value if it matches our criteria and is a valid number
       if (shouldInclude && Number.isInteger(value) && value >= 1 && value <= gridSize) {
@@ -492,7 +509,9 @@ function getSudokuPuzzle(row) {
     }
     puzzle.push(row);
   }
-  
+  // Log puzzle for debugging
+  console.log('Generated puzzle array:');
+  console.log(JSON.stringify(puzzle, null, 2));
   return puzzle;
 }
 
@@ -517,7 +536,6 @@ function getSectionTitle(sectionType, row) {
 function outputRows(sudokuArray, body, currentRow) {
   console.log(`outputRows called with currentRow=${currentRow}, type=${typeof currentRow}`);
   validateSudokuArray(sudokuArray, currentRow);
-  const { sheetName: answersSheetName } = getAnswersSheetInfo(currentRow);
   const sections = sudokuArray.map(sudokuRow => 
     sudokuRow
       .map(value => {
@@ -664,7 +682,7 @@ function createSudokuGrid(row) {
     const spreadsheet = SpreadsheetApp.openById(SPREADSHEET_ID);
     const targetSpreadsheet = SpreadsheetApp.openById(targetSpreadsheetId);
     const gridSize = getGridSize(row);
-    const templateName = gridSize === GRID_SIZE_4 ? 'Template4' : 'Template6';
+    const templateName = gridSize === 4 ? 'Template4' : gridSize === 6 ? 'Template6' : 'Template9';
     const templateSheet = spreadsheet.getSheetByName(templateName);
     if (!templateSheet) {
       throw new Error(`${templateName} sheet not found`);
@@ -692,7 +710,7 @@ function createSudokuGrid(row) {
     sudokuGrid.setName(shortname);
 
     // Get the named range from the spreadsheet to find the correct cell
-    const namedRange = gridSize === GRID_SIZE_4 ? 'Template4Name' : 'Template6Name';
+    const namedRange = gridSize === 4 ? 'Template4Name' : gridSize === 6 ? 'Template6Name' : 'Template9Name';
     const templateRange = spreadsheet.getRangeByName(namedRange);
     if (!templateRange) {
       throw new Error(`Named range "${namedRange}" not found`);
@@ -706,14 +724,14 @@ function createSudokuGrid(row) {
     sudokuGrid.getRange(templateRow, templateCol).setValue(longname);
 
     // Get the answers sheet name and data
-    const answersSheetName = getAnswersSheetInfo(row).sheetName;
+    const { sheetName: answersSheetName, startCell } = getAnswersSheetInfo(row);
     const answersSheet = spreadsheet.getSheetByName(answersSheetName);
     if (!answersSheet) {
       throw new Error(`Sheet "${answersSheetName}" not found for row ${row}`);
     }
 
-    const answersRange = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
-    const values = answersSheet.getRange(answersRange).getValues();
+    const { range, startRow, startCol } = getGridRange(startCell, gridSize);
+    const values = answersSheet.getRange(range).getValues();
 
     // Process each cell in the answers sheet
     for (let i = 0; i < gridSize; i++) {
@@ -723,11 +741,12 @@ function createSudokuGrid(row) {
         // Check if the cell is bold
         let isBold = false;
         try {
-          const cell = answersSheet.getRange(i + 1, j + 1);
+          // Use the actual cell coordinates from the answers sheet
+          const cell = answersSheet.getRange(startRow + i, startCol.charCodeAt(0) - 64 + j);
           const fontWeight = cell.getFontWeight();
           isBold = fontWeight === "bold";
         } catch (e) {
-          console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
+          console.log(`Could not get font weight for cell (${startRow + i}, ${startCol.charCodeAt(0) - 64 + j}): ${e.message}`);
         }
         
         // If the cell is bold and contains a number, set the corresponding cell in SudokuGrid to 'X'
