@@ -174,15 +174,59 @@ function getImageBlob(url) {
 }
 
 /**
- * Inserts an image into a paragraph
- * @param {GoogleAppsScript.Document.Paragraph} paragraph - The paragraph to insert into
- * @param {string} url - The image URL
+ * Inserts an image into a paragraph while maintaining aspect ratio
+ * @param {GoogleAppsScript.Document.Paragraph} paragraph - The paragraph to insert the image into
+ * @param {string} url - The URL of the image to insert
+ * @returns {GoogleAppsScript.Document.InlineImage} The inserted image
  */
 function insertImage(paragraph, url) {
-  const image = getImageBlob(url);
-  const insertedImage = paragraph.appendInlineImage(image);
-  insertedImage.setWidth(IMAGE_CONFIG.content.width);
-  insertedImage.setHeight(IMAGE_CONFIG.content.height);
+  try {
+    const blob = UrlFetchApp.fetch(url).getBlob();
+    const image = paragraph.appendInlineImage(blob);
+    
+    // Set height to 50 points while maintaining aspect ratio
+    const originalWidth = image.getWidth();
+    const originalHeight = image.getHeight();
+    const aspectRatio = originalWidth / originalHeight;
+    const targetHeight = 50; // points
+    const targetWidth = targetHeight * aspectRatio;
+    
+    image.setHeight(targetHeight);
+    image.setWidth(targetWidth);
+    
+    return image;
+  } catch (error) {
+    console.error(`Error inserting image from URL ${url}:`, error);
+    throw new Error(`Failed to insert image: ${error.message}`);
+  }
+}
+
+/**
+ * Gets the name and starting cell of the answers sheet from the Sudokus sheet
+ * @param {number} row - The row number to get the sheet info from
+ * @returns {{sheetName: string, startCell: string}} Object containing sheet name and starting cell reference
+ * @throws {Error} If the sheet info cannot be read
+ */
+function getAnswersSheetInfo(row) {
+  console.log(`getAnswersSheetInfo called with row=${row}, type=${typeof row}`);
+  if (!row || typeof row !== 'number' || row < 2) {
+    throw new Error(`Invalid row number: ${row} (type: ${typeof row}). Must be row 2 or greater.`);
+  }
+  
+  const sheet = getSpreadsheet();
+  const cellValue = sheet.getRange(row, 3).getValue();
+  
+  if (!cellValue || typeof cellValue !== 'string') {
+    throw new Error(`Cell C${row} does not contain a valid sheet reference`);
+  }
+  
+  // Split into sheet name and cell reference (e.g. "Answers6.1!A1" -> ["Answers6.1", "A1"])
+  const [sheetName, startCell] = cellValue.split('!');
+  if (!sheetName || !startCell) {
+    throw new Error(`Cell C${row} does not contain a valid sheet reference format (expected "SheetName!CellReference")`);
+  }
+  
+  return { sheetName, startCell };
 }
 
 /**
@@ -193,8 +237,9 @@ function insertImage(paragraph, url) {
  * @returns {string} The image URL from the corresponding cell
  * @throws {Error} If the number is out of range, cell doesn't contain an image formula, or referenced cell is empty
  */
-function getImageFromCell(num, answersSheetName, row) {
-  console.log(`getImageFromCell called with num=${num}, answersSheetName=${answersSheetName}, row=${row}`);
+function getImageFromCell(num, row) {
+  console.log(`getImageFromCell called with num=${num}, row=${row}`);
+  const { sheetName: answersSheetName } = getAnswersSheetInfo(row);
   const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
   console.log(`Determined gridSize=${gridSize} from answersSheetName`);
   if (num < 1 || num > gridSize) {
@@ -209,7 +254,7 @@ function getImageFromCell(num, answersSheetName, row) {
   const formula = cell.getFormula();
   if (formula == "") {
     return cell.getValue().getContentUrl();
-}
+  }
 
   if (!formula.toLowerCase().startsWith('=image(')) {
     throw new Error(`Cell ${String.fromCharCode(65 + num + 3)}${row} does not contain an image formula`);
@@ -323,8 +368,9 @@ function getNonNullValues(array, boundaries) {
   for (let i = boundaries.rowStart; i <= boundaries.rowEnd; i++) {
     for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
       if (array[i][j] !== null) {
+        const { sheetName: answersSheetName } = getAnswersSheetInfo(i + 1);
         values.push({
-          url: getImageFromCell(array[i][j], getAnswersSheetName(i + 1), i + 1),
+          url: getImageFromCell(array[i][j], i + 1),
           value: array[i][j]
         });
       }
@@ -364,14 +410,51 @@ function getMayOnlyContain(row) {
 }
 
 /**
+ * Gets the answers from the answers sheet
+ * @param {string} answersSheetName - The name of the answers sheet
+ * @param {string} startCell - The starting cell reference (e.g. "A1")
+ * @returns {Array<Array<number>>} The answers array
+ */
+function getAnswers(answersSheetName, startCell) {
+  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
+  
+  // Parse the starting cell to get row and column offsets
+  const startCol = startCell.match(/[A-Z]+/)[0];
+  const startRow = parseInt(startCell.match(/\d+/)[0]);
+  
+  // Calculate the end cell based on grid size and starting position
+  const endCol = String.fromCharCode(startCol.charCodeAt(0) + gridSize - 1);
+  const endRow = startRow + gridSize - 1;
+  const range = `${startCell}:${endCol}${endRow}`;
+  
+  const values = getSheetData(answersSheetName, range);
+  
+  // Validate that all values are numbers between 1 and gridSize
+  if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
+    throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
+  }
+  
+  return values;
+}
+
+/**
  * Gets the Sudoku puzzle from the answers sheet, returning either the specified or non-specified values based on mayOnlyContain value
  * @param {number} row - The row number to get the puzzle from
  * @returns {Array<Array<number|null>>} The Sudoku puzzle array
  */
 function getSudokuPuzzle(row) {
-  const answersSheetName = getAnswersSheetName(row);
+  const { sheetName: answersSheetName, startCell } = getAnswersSheetInfo(row);
   const gridSize = getGridSize(row);
-  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
+  
+  // Parse the starting cell to get row and column offsets
+  const startCol = startCell.match(/[A-Z]+/)[0];
+  const startRow = parseInt(startCell.match(/\d+/)[0]);
+  
+  // Calculate the end cell based on grid size and starting position
+  const endCol = String.fromCharCode(startCol.charCodeAt(0) + gridSize - 1);
+  const endRow = startRow + gridSize - 1;
+  const range = `${startCell}:${endCol}${endRow}`;
+  
   const values = getSheetData(answersSheetName, range);
   const sheet = getSheetByName(answersSheetName);
   const mayOnlyContain = getMayOnlyContain(row);
@@ -388,11 +471,12 @@ function getSudokuPuzzle(row) {
       // Check if the cell is specified by getting its font weight
       let isSpecified = false;
       try {
-        const cell = sheet.getRange(i + 1, j + 1);
+        // Adjust cell coordinates based on starting position
+        const cell = sheet.getRange(startRow + i, startCol.charCodeAt(0) - 64 + j);
         const fontWeight = cell.getFontWeight();
         isSpecified = fontWeight === "bold";
       } catch (e) {
-        console.log(`Could not get font weight for cell (${i+1}, ${j+1}): ${e.message}`);
+        console.log(`Could not get font weight for cell (${startRow + i}, ${startCol.charCodeAt(0) - 64 + j}): ${e.message}`);
       }
       
       // If mayOnlyContain is true, we want specified values
@@ -433,11 +517,12 @@ function getSectionTitle(sectionType, row) {
 function outputRows(sudokuArray, body, currentRow) {
   console.log(`outputRows called with currentRow=${currentRow}, type=${typeof currentRow}`);
   validateSudokuArray(sudokuArray, currentRow);
+  const { sheetName: answersSheetName } = getAnswersSheetInfo(currentRow);
   const sections = sudokuArray.map(sudokuRow => 
     sudokuRow
       .map(value => {
         if (value === null) return null;
-        const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
+        const url = getImageFromCell(value, currentRow);
         return url ? { url, value } : null;
       })
       .filter(Boolean)
@@ -454,12 +539,13 @@ function outputRows(sudokuArray, body, currentRow) {
 function outputColumns(sudokuArray, body, currentRow) {
   validateSudokuArray(sudokuArray, currentRow);
   const gridSize = getGridSize(currentRow);
+  const { sheetName: answersSheetName } = getAnswersSheetInfo(currentRow);
   const sections = Array.from({ length: gridSize }, (_, j) =>
     sudokuArray
       .map(sudokuRow => {
         const value = sudokuRow[j];
         if (value === null) return null;
-        const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
+        const url = getImageFromCell(value, currentRow);
         return url ? { url, value } : null;
       })
       .filter(Boolean)
@@ -477,13 +563,14 @@ function outputGroups(sudokuArray, body, currentRow) {
   validateSudokuArray(sudokuArray, currentRow);
   const gridSize = getGridSize(currentRow);
   const groupBoundaries = getGroupBoundaries(gridSize);
+  const { sheetName: answersSheetName } = getAnswersSheetInfo(currentRow);
   const sections = groupBoundaries.map(boundaries => {
     const values = [];
     for (let i = boundaries.rowStart; i <= boundaries.rowEnd; i++) {
       for (let j = boundaries.colStart; j <= boundaries.colEnd; j++) {
         const value = sudokuArray[i][j];
         if (value !== null) {
-          const url = getImageFromCell(value, getAnswersSheetName(currentRow), currentRow);
+          const url = getImageFromCell(value, currentRow);
           if (url) {
             values.push({ url, value });
           }
@@ -505,11 +592,12 @@ function createReferencePage(body, row) {
   createSectionHeader(body, 'Reference Images');
   
   const gridSize = getGridSize(row);
+  const { sheetName: answersSheetName } = getAnswersSheetInfo(row);
   
   // Create a paragraph for each number (1-4 or 1-6)
   for (let num = 1; num <= gridSize; num++) {
     const paragraph = body.appendParagraph('');
-    const url = getImageFromCell(num, getAnswersSheetName(row), row);
+    const url = getImageFromCell(num, row);
     
     // Insert copies of the same image
     for (let i = 0; i < gridSize; i++) {
@@ -518,28 +606,6 @@ function createReferencePage(body, row) {
     
     body.appendParagraph(''); // Add spacing between rows
   }
-}
-
-/**
- * Gets the name of the answers sheet from the Sudokus sheet
- * @param {number} row - The row number to get the sheet name from
- * @returns {string} The name of the answers sheet
- * @throws {Error} If the sheet name cannot be read
- */
-function getAnswersSheetName(row) {
-  console.log(`getAnswersSheetName called with row=${row}, type=${typeof row}`);
-  if (!row || typeof row !== 'number' || row < 2) {
-    throw new Error(`Invalid row number: ${row} (type: ${typeof row}). Must be row 2 or greater.`);
-  }
-  
-  const sheet = getSpreadsheet();
-  const sheetName = sheet.getRange(row, 3).getValue();
-  
-  if (!sheetName || typeof sheetName !== 'string') {
-    throw new Error(`Cell C${row} does not contain a valid sheet name`);
-  }
-  
-  return sheetName;
 }
 
 /**
@@ -570,9 +636,9 @@ function createAnswersSheet(body, row) {
   createSectionHeader(body, 'Solution');
   
   // Get answers from the sheet
-  const answersSheetName = getAnswersSheetName(row);
-  console.log(`createAnswersSheet: answersSheetName=${answersSheetName}, row=${row}`);
-  const answers = getAnswers(row);
+  const { sheetName: answersSheetName, startCell } = getAnswersSheetInfo(row);
+  console.log(`createAnswersSheet: answersSheetName=${answersSheetName}, startCell=${startCell}, row=${row}`);
+  const answers = getAnswers(answersSheetName, startCell);
   console.log(`createAnswersSheet: answers=${JSON.stringify(answers)}`);
   
   // Create a row for each answer array
@@ -581,7 +647,7 @@ function createAnswersSheet(body, row) {
     const paragraph = body.appendParagraph('');
     answerRow.forEach(value => {
       console.log(`Processing value ${value} in row ${index + 1}`);
-      const url = getImageFromCell(value, answersSheetName, row);
+      const url = getImageFromCell(value, row);
       insertImage(paragraph, url);
     });
     body.appendParagraph(''); // Add spacing between rows
@@ -640,7 +706,7 @@ function createSudokuGrid(row) {
     sudokuGrid.getRange(templateRow, templateCol).setValue(longname);
 
     // Get the answers sheet name and data
-    const answersSheetName = getAnswersSheetName(row);
+    const answersSheetName = getAnswersSheetInfo(row).sheetName;
     const answersSheet = spreadsheet.getSheetByName(answersSheetName);
     if (!answersSheet) {
       throw new Error(`Sheet "${answersSheetName}" not found for row ${row}`);
@@ -676,25 +742,6 @@ function createSudokuGrid(row) {
     console.error(`Error creating SudokuGrid for row ${row}:`, error.message);
     throw error;
   }
-}
-
-/**
- * Gets the answers from the answers sheet
- * @param {number} row - The row number to get the answers from
- * @returns {Array<Array<number>>} The answers array
- */
-function getAnswers(row) {
-  const answersSheetName = getAnswersSheetName(row);
-  const gridSize = answersSheetName.includes('6') ? GRID_SIZE_6 : GRID_SIZE_4;
-  const range = `A1:${String.fromCharCode(64 + gridSize)}${gridSize}`;
-  const values = getSheetData(answersSheetName, range);
-  
-  // Validate that all values are numbers between 1 and gridSize
-  if (!values.every(row => row.every(cell => Number.isInteger(cell) && cell >= 1 && cell <= gridSize))) {
-    throw new Error(`Invalid values in "${answersSheetName}" sheet. All values must be integers between 1 and ${gridSize}`);
-  }
-  
-  return values;
 }
 
 /**
